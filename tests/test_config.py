@@ -36,6 +36,16 @@ def test_write_server_accepts_nested_server_name(tmp_path: Path):
     assert "Zhang服务器" in path.read_text(encoding="utf-8")
 
 
+def test_server_port_is_not_concatenated_when_saved(tmp_path: Path):
+    manager = ConfigManager(tmp_path)
+    path = manager.write_server({
+        "server": {"name": "server", "host": "192.0.2.1", "port": "10140", "username": "root"},
+        "ssh": {"enabled": "true", "private_key": "key"},
+        "deploy": {"certificate_path": "/fullchain.pem", "private_key_path": "/privkey.pem", "reload_nginx": "true", "reload_command": "systemctl reload nginx"},
+        "certificates": {"domains": ""},
+    })
+    assert manager.load_server(path).port == 10140
+    assert "port = 1014022" not in path.read_text(encoding="utf-8")
 def test_domain_has_independent_server_binding_paths(tmp_path: Path):
     manager = ConfigManager(tmp_path)
     manager.ensure_dirs()

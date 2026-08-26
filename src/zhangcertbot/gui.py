@@ -132,9 +132,16 @@ class ZhangCertbotGUI:
             self.entries["private_key"].delete(0, "end")
             self.entries["private_key"].insert(0, path)
 
+    def _replace_entry(self, key: str, value: str):
+        entry = self.entries[key]
+        entry.configure(state="normal")
+        entry.delete(0, "end")
+        entry.insert(0, value or "")
+
     def _clear_form(self):
-        for entry in self.entries.values(): entry.delete(0, "end")
-        self.entries["port"].insert(0, "22")
+        for entry in self.entries.values():
+            entry.configure(state="normal")
+            entry.delete(0, "end")
         self.auto_upload.set(False)
         self.auto_reload.set(True)
 
@@ -201,34 +208,38 @@ class ZhangCertbotGUI:
         self._clear_form()
         self._set_deploy_fields_visible(True)
         if server:
-            self.entries["server_name"].insert(0, server.name)
-            self.entries["host"].insert(0, server.host)
-            self.entries["port"].insert(0, str(server.port))
-            self.entries["private_key"].insert(0, server.private_key)
-            self.entries["certificate_path"].insert(0, server.certificate_path)
-            self.entries["private_key_path"].insert(0, server.private_key_path)
-            self.entries["reload_command"].insert(0, server.reload_command)
+            self._replace_entry("server_name", server.name)
+            self._replace_entry("host", server.host)
+            self._replace_entry("port", str(server.port))
+            self._replace_entry("private_key", server.private_key)
+            self._replace_entry("certificate_path", server.certificate_path)
+            self._replace_entry("private_key_path", server.private_key_path)
+            self._replace_entry("reload_command", server.reload_command)
             self.auto_upload.set(True); self.auto_reload.set(server.reload_nginx)
+        else:
+            self.entries["port"].insert(0, "22")
 
     def load_domain(self, domain):
         self.mode.set("deploy" if domain.deploy else "orphan")
         self.form_mode_label.configure(text="当前模式：服务器部署域名" if domain.deploy else "当前模式：孤立域名")
         self._clear_form()
-        self.entries["name"].insert(0, domain.name)
-        self.entries["token"].insert(0, domain.api_token)
+        self._replace_entry("name", domain.name)
+        self._replace_entry("token", domain.api_token)
         self.auto_upload.set(domain.deploy)
         if domain.deploy:
             server = next((x for x in self.manager.list_servers() if x.file.name == domain.server_file), None)
             self.new_deploy_domain(server)
-            self.entries["name"].insert(0, domain.name)
-            self.entries["token"].insert(0, domain.api_token)
+            self._replace_entry("name", domain.name)
+            self._replace_entry("token", domain.api_token)
             binding = domain.binding_for(domain.server_file)
-            self.entries["certificate_path"].delete(0, "end"); self.entries["certificate_path"].insert(0, binding.certificate_path)
-            self.entries["private_key_path"].delete(0, "end"); self.entries["private_key_path"].insert(0, binding.private_key_path)
-            self.entries["reload_command"].delete(0, "end"); self.entries["reload_command"].insert(0, binding.reload_command)
+            self._replace_entry("certificate_path", binding.certificate_path)
+            self._replace_entry("private_key_path", binding.private_key_path)
+            self._replace_entry("reload_command", binding.reload_command)
             self.auto_upload.set(True); self.auto_reload.set(binding.reload_nginx)
         else:
-            self.new_orphan(); self.entries["name"].insert(0, domain.name); self.entries["token"].configure(state="normal"); self.entries["token"].insert(0, domain.api_token)
+            self.new_orphan()
+            self._replace_entry("name", domain.name)
+            self._replace_entry("token", domain.api_token)
 
     def save_domain(self):
         try:
