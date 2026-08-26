@@ -39,6 +39,9 @@ class ZhangCertbotGUI:
         ttk.Checkbutton(toolbar, text="启用", variable=self.parallel).pack(side="left")
         ttk.Label(toolbar, text="最大线程数").pack(side="left", padx=(8, 3))
         ttk.Spinbox(toolbar, from_=1, to=32, width=5, textvariable=self.workers).pack(side="left")
+        ttk.Label(toolbar, text="最大重试次数").pack(side="left", padx=(12, 3))
+        self.retries = tk.IntVar(value=2)
+        ttk.Spinbox(toolbar, from_=0, to=10, width=5, textvariable=self.retries).pack(side="left")
         ttk.Button(toolbar, text="续期全部", command=self.renew_all).pack(side="right", padx=3)
 
         pane = ttk.PanedWindow(self.window, orient="horizontal")
@@ -247,7 +250,7 @@ class ZhangCertbotGUI:
             self.show_servers() if self.mode.get() == "deploy" else self.show_orphans()
         except Exception as exc: messagebox.showerror("保存失败", str(exc))
 
-    def _settings(self): return BatchSettings(self.parallel.get(), max(1, int(self.workers.get())))
+    def _settings(self): return BatchSettings(self.parallel.get(), max(1, int(self.workers.get())), max(0, int(self.retries.get())))
     def _processor(self): return BatchProcessor(self.manager)
     def _async(self, function, label):
         self.log(f"[{label}] 开始执行")
@@ -256,7 +259,9 @@ class ZhangCertbotGUI:
         def work():
             try:
                 results = function(progress)
-                self.window.after(0, lambda: self.log(f"[{label}] 完成，共处理 {len(results)} 个域名"))
+                ok_count = sum(1 for item in results if item.ok)
+                fail_count = len(results) - ok_count
+                self.window.after(0, lambda: self.log(f"[{label}] 处理结束：成功 {ok_count}，失败 {fail_count}，共 {len(results)} 个域名"))
             except Exception as exc:
                 self.window.after(0, lambda: self.log(f"[{label}] 失败：{exc}"))
         threading.Thread(target=work, daemon=True).start()

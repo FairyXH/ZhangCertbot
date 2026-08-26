@@ -11,10 +11,11 @@ def make_domain(tmp_path: Path, name: str, deploy: bool = False) -> DomainConfig
                         "token", name, tmp_path / "certificates" / name, deploy, "server1-config.ini")
 
 
-def test_batch_settings_limits_workers():
-    assert BatchSettings(False, 20).workers(10) == 1
-    assert BatchSettings(True, 3).workers(10) == 3
-    assert BatchSettings(True, 20).workers(2) == 2
+def test_batch_settings_limits_workers_and_retries():
+    assert BatchSettings(False, 20, 2).workers(10) == 1
+    assert BatchSettings(True, 3, 2).workers(10) == 3
+    assert BatchSettings(True, 20, 0).workers(2) == 2
+    assert BatchSettings(True, 3, 2).attempts == 3
 
 
 def test_batch_issue_processes_each_domain_independently(tmp_path: Path):
@@ -40,6 +41,46 @@ def test_batch_issue_processes_each_domain_independently(tmp_path: Path):
     results = BatchProcessor(manager, Runner(), Deployer()).issue(domains, BatchSettings(True, 2))
     assert {item.domain for item in results} == {"one.example", "two.example"}
     assert sorted(calls) == ["one.example", "two.example"]
+
+
+def test_batch_issue_retries_and_returns_final_success(tmp_path: Path):
+    manager = ConfigManager(tmp_path)
+    domain = make_domain(tmp_path, "one.example")
+    calls = []
+    events = []
+
+    class Runner:
+        def issue(self, item):
+            calls.append(item.name)
+            return SimpleNamespace(ok=len(calls) == 2, stderr="网络超时")
+
+    class Certificates:
+        def export(self, item):
+            return True
+
+    class Deployer:
+        certificates = Certificates()
+
+    results = BatchProcessor(manager, Runner(), Deployer()).issue([domain], BatchSettings(max_retries=1), events.append)
+    assert results[0].ok is True
+    assert len(calls) == 2
+    assert any("重试" in event.message for event in events)
+
+
+def test_batch_issue_exhausted_retries_is_failure(tmp_path: Path):
+    manager = ConfigManager(tmp_path)
+    domain = make_domain(tmp_path, "one.example")
+    calls = []
+
+    class Runner:
+        def issue(self, item):
+            calls.append(item.name)
+            return SimpleNamespace(ok=False, stderr="ReadTimeout")
+
+    results = BatchProcessor(manager, Runner(), SimpleNamespace()).issue([domain], BatchSettings(max_retries=2))
+    assert results[0].ok is False
+    assert len(calls) == 3
+    assert "重试次数已用尽" in results[0].message
 
 
 def test_batch_callback_receives_each_completed_domain(tmp_path: Path):

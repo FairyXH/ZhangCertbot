@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Callable, Iterable
 
-from .certbot_runner import CertbotRunner, CertbotResult
+from .certbot_runner import CertbotRunner
 from .certificate_manager import CertificateManager
 from .config_manager import ConfigManager, DomainConfig
 from .deploy_manager import DeployManager
@@ -14,6 +15,12 @@ from .deploy_manager import DeployManager
 class BatchSettings:
     parallel: bool = False
     max_workers: int = 4
+    max_retries: int = 2
+    retry_delay: float = 1.0
+
+    @property
+    def attempts(self) -> int:
+        return max(1, int(self.max_retries) + 1)
 
     def workers(self, count: int) -> int:
         if not self.parallel:
@@ -42,18 +49,25 @@ class BatchProcessor:
         domain_list = list(domains)
 
         def one(domain: DomainConfig) -> BatchItemResult:
-            result = self.runner.issue(domain)
-            if not result.ok:
-                return BatchItemResult(domain.name, False, result.stderr.strip() or "Certbot 申请失败")
-            try:
-                self.deployer.certificates.export(domain)
-                deployed = False
-                if domain.deploy:
-                    self.deployer.deploy(domain)
-                    deployed = True
-                return BatchItemResult(domain.name, True, "申请成功", deployed)
-            except Exception as exc:
-                return BatchItemResult(domain.name, False, str(exc))
+            last_message = "Certbot 申请失败"
+            for attempt in range(1, settings.attempts + 1):
+                result = self.runner.issue(domain)
+                if result.ok:
+                    try:
+                        self.deployer.certificates.export(domain)
+                        deployed = False
+                        if domain.deploy:
+                            self.deployer.deploy(domain)
+                            deployed = True
+                        return BatchItemResult(domain.name, True, "申请成功", deployed)
+                    except Exception as exc:
+                        return BatchItemResult(domain.name, False, str(exc))
+                last_message = result.stderr.strip() or "Certbot 申请失败"
+                if attempt < settings.attempts:
+                    self._emit(callback, BatchItemResult(domain.name, False, f"申请失败，第 {attempt} 次重试：{last_message}"))
+                    if settings.retry_delay > 0:
+                        time.sleep(settings.retry_delay)
+            return BatchItemResult(domain.name, False, f"申请失败，重试次数已用尽：{last_message}")
 
         return self._map(domain_list, settings, one, callback)
 
@@ -83,9 +97,8 @@ class BatchProcessor:
             return self._map(domain_list, settings, one, callback)
         message = result.stderr.strip() or "Certbot 续期失败"
         failures = [BatchItemResult(domain.name, False, message) for domain in domain_list]
-        if callback:
-            for item in failures:
-                callback(item)
+        for item in failures:
+            self._emit(callback, item)
         return failures
 
     def deploy(self, domains: Iterable[DomainConfig], settings: BatchSettings,
@@ -98,6 +111,11 @@ class BatchProcessor:
                 return BatchItemResult(domain.name, False, str(exc))
 
         return self._map(list(domains), settings, one, callback)
+
+    @staticmethod
+    def _emit(callback, item):
+        if callback:
+            callback(item)
 
     @staticmethod
     def _map(domains, settings, operation, callback):
