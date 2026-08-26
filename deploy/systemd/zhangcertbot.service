@@ -1,0 +1,7 @@
+[Unit]
+Description=ZhangCertbot certificate renewal
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/ZhangCertbot
+ExecStart=/opt/ZhangCertbot/.venv/bin/python /opt/ZhangCertbot/main.py renew

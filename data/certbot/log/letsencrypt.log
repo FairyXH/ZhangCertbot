@@ -1,0 +1,49 @@
+2026-08-26 15:22:33,913:DEBUG:certbot._internal.main:certbot version: 5.7.0
+2026-08-26 15:22:33,913:DEBUG:certbot._internal.main:Location of certbot entry point: D:\Storageredirect\Program\Python\3.13.5\Scripts\certbot
+2026-08-26 15:22:33,913:DEBUG:certbot._internal.main:Arguments: []
+2026-08-26 15:22:33,914:DEBUG:certbot._internal.main:Discovered plugins: PluginsRegistry(PluginEntryPoint#dns-cloudflare,PluginEntryPoint#manual,PluginEntryPoint#null,PluginEntryPoint#standalone,PluginEntryPoint#webroot)
+2026-08-26 15:22:33,983:DEBUG:certbot._internal.log:Root logging level set at 30
+2026-08-26 15:22:34,022:DEBUG:certbot._internal.display.obj:Notifying user: Processing C:\Certbot\renewal\zhangfairy.ccwu.cc.conf
+2026-08-26 15:22:34,023:ERROR:certbot._internal.renewal:Renewal configuration file C:\Certbot\renewal\zhangfairy.ccwu.cc.conf is broken.
+2026-08-26 15:22:34,024:ERROR:certbot._internal.renewal:The error was: expected C:\Certbot\live\zhangfairy.ccwu.cc\cert.pem to be a symlink
+Skipping.
+2026-08-26 15:22:34,024:DEBUG:certbot._internal.renewal:Traceback was:
+Traceback (most recent call last):
+  File "D:\Storageredirect\Program\Python\3.13.5\Lib\site-packages\certbot\_internal\renewal.py", line 114, in reconstitute
+    renewal_candidate = storage.RenewableCert(full_path, config)
+  File "D:\Storageredirect\Program\Python\3.13.5\Lib\site-packages\certbot\_internal\storage.py", line 519, in __init__
+    self._check_symlinks()
+    ~~~~~~~~~~~~~~~~~~~~^^
+  File "D:\Storageredirect\Program\Python\3.13.5\Lib\site-packages\certbot\_internal\storage.py", line 598, in _check_symlinks
+    raise errors.CertStorageError(
+        "expected {0} to be a symlink".format(link))
+certbot.errors.CertStorageError: expected C:\Certbot\live\zhangfairy.ccwu.cc\cert.pem to be a symlink
+
+2026-08-26 15:22:34,025:DEBUG:certbot._internal.display.obj:Notifying user: 
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+2026-08-26 15:22:34,025:DEBUG:certbot._internal.display.obj:Notifying user: No renewals were attempted.
+2026-08-26 15:22:34,025:DEBUG:certbot._internal.display.obj:Notifying user: 
+Additionally, the following renewal configurations were invalid: 
+2026-08-26 15:22:34,025:DEBUG:certbot._internal.display.obj:Notifying user:   C:\Certbot\renewal\zhangfairy.ccwu.cc.conf (parsefail)
+2026-08-26 15:22:34,025:DEBUG:certbot._internal.display.obj:Notifying user: - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+2026-08-26 15:22:34,025:DEBUG:certbot._internal.log:Exiting abnormally:
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "D:\Storageredirect\Program\Python\3.13.5\Scripts\certbot.exe\__main__.py", line 5, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "D:\Storageredirect\Program\Python\3.13.5\Lib\site-packages\certbot\main.py", line 18, in main
+    return internal_main.main(cli_args)
+           ~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "D:\Storageredirect\Program\Python\3.13.5\Lib\site-packages\certbot\_internal\main.py", line 1886, in main
+    return config.func(config, plugins)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "D:\Storageredirect\Program\Python\3.13.5\Lib\site-packages\certbot\_internal\main.py", line 1636, in renew
+    renewal.handle_renewal_request(config)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^
+  File "D:\Storageredirect\Program\Python\3.13.5\Lib\site-packages\certbot\_internal\renewal.py", line 745, in handle_renewal_request
+    raise errors.Error(
+        f"{len(renew_failures)} renew failure(s), {len(parse_failures)} parse failure(s)")
+certbot.errors.Error: 0 renew failure(s), 1 parse failure(s)
+2026-08-26 15:22:34,026:ERROR:certbot._internal.log:0 renew failure(s), 1 parse failure(s)
