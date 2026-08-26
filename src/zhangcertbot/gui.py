@@ -220,7 +220,7 @@ class ZhangCertbotGUI:
         ttk.Button(buttons, text="保存", command=save).pack(side="left", padx=4)
         ttk.Button(buttons, text="取消", command=dialog.destroy).pack(side="left", padx=4)
 
-
+    def choose_key(self):
         path = filedialog.askopenfilename(title="选择 SSH 私钥文件")
         if path:
             self.entries["private_key"].delete(0, "end")
