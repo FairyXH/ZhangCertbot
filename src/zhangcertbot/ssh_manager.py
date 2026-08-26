@@ -13,6 +13,13 @@ from .config_manager import DeploymentBinding, ServerConfig
 
 
 class SSHManager:
+    def __init__(self, connect_timeout: float = 20.0, banner_timeout: float = 30.0,
+                 auth_timeout: float = 30.0, channel_timeout: float = 30.0):
+        self.connect_timeout = connect_timeout
+        self.banner_timeout = banner_timeout
+        self.auth_timeout = auth_timeout
+        self.channel_timeout = channel_timeout
+
     def deploy(self, server: ServerConfig, fullchain: Path, private_key: Path, binding: DeploymentBinding | None = None) -> None:
         if paramiko is None:
             raise RuntimeError("未安装 Paramiko，无法执行 SSH 部署")
@@ -23,7 +30,7 @@ class SSHManager:
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         try:
-            client.connect(server.host, port=server.port, username=server.username, key_filename=str(key_path), timeout=20)
+            client.connect(server.host, port=server.port, username=server.username, key_filename=str(key_path), timeout=self.connect_timeout, banner_timeout=self.banner_timeout, auth_timeout=self.auth_timeout, channel_timeout=self.channel_timeout)
             sftp = client.open_sftp()
             try:
                 self._upload_atomic(sftp, fullchain, binding.certificate_path)
@@ -37,7 +44,10 @@ class SSHManager:
                 if code:
                     raise RuntimeError(f"Nginx 配置测试失败，未执行 reload：{stderr.read().decode(errors='replace').strip()}")
         except paramiko.SSHException as exc:
-            raise RuntimeError(f"SSH 连接或上传失败：{exc}") from exc
+            message = str(exc)
+            if "banner" in message.lower():
+                raise RuntimeError(f"SSH 协议 Banner 读取失败：{server.host}:{server.port}。请确认该端口确实是 SSH 端口，且服务器未被代理/面板端口替代。") from exc
+            raise RuntimeError(f"SSH 连接或上传失败：{message}") from exc
         finally:
             client.close()
 
