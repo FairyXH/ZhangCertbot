@@ -24,52 +24,83 @@ class SSHManager:
         self.connect_attempts = max(1, int(connect_attempts))
         self.retry_delay = max(0.0, float(retry_delay))
 
-    def deploy(self, server: ServerConfig, fullchain: Path, private_key: Path, binding: DeploymentBinding | None = None) -> None:
+    @staticmethod
+    def _key_path(server: ServerConfig) -> Path:
+        value = server.private_key.strip().strip('"').strip("'")
+        return Path(os.path.expandvars(os.path.expanduser(value)))
+
+    def connect(self, server: ServerConfig):
         if paramiko is None:
-            raise RuntimeError("未安装 Paramiko，无法执行 SSH 部署")
-        key_path = Path(os.path.expandvars(os.path.expanduser(server.private_key.strip().strip('"').strip("'"))))
-        if not key_path.exists():
-            raise FileNotFoundError(f"SSH 私钥不存在：{key_path}")
-        binding = binding or DeploymentBinding(server.certificate_path, server.private_key_path, server.reload_nginx, server.reload_command)
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            raise RuntimeError("未安装 Paramiko，无法执行 SSH 操作")
+        key_path = self._key_path(server)
+        if not key_path.is_file() and not server.password:
+            raise ValueError("SSH 私钥或密码至少需要配置一个")
         last_error = None
         for attempt in range(1, self.connect_attempts + 1):
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             try:
-                self._deploy_connected(client, server, key_path, fullchain, private_key, binding)
-                client.close()
-                return
+                client.connect(
+                    hostname=server.host,
+                    port=server.port,
+                    username=server.username or "root",
+                    key_filename=str(key_path) if key_path.is_file() else None,
+                    password=server.password or None,
+                    timeout=self.connect_timeout,
+                    banner_timeout=self.banner_timeout,
+                    auth_timeout=self.auth_timeout,
+                    channel_timeout=self.channel_timeout,
+                    allow_agent=False,
+                    look_for_keys=False,
+                )
+                return client
             except paramiko.SSHException as exc:
                 last_error = exc
+                client.close()
                 if "banner" not in str(exc).lower() or attempt >= self.connect_attempts:
                     break
-                client.close()
-                client = paramiko.SSHClient()
-                client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
                 if self.retry_delay:
                     time.sleep(self.retry_delay)
-        client.close()
-        if last_error is not None:
-            message = str(last_error)
-            if "banner" in message.lower():
-                raise RuntimeError(f"SSH 协议 Banner 读取失败：{server.host}:{server.port}。XShell 可连接时，请检查是否使用了跳板机、代理或不同 SSH 算法配置。") from last_error
-            raise RuntimeError(f"SSH 连接或上传失败：{message}") from last_error
-        raise RuntimeError(f"SSH 连接或上传失败：{server.host}:{server.port}")
+        message = str(last_error) if last_error else f"{server.host}:{server.port}"
+        if last_error and "banner" in message.lower():
+            raise RuntimeError(f"SSH 协议 Banner 读取失败：{server.host}:{server.port}。XShell 可连接时，请检查是否使用了跳板机、代理或不同 SSH 算法配置。") from last_error
+        raise RuntimeError(f"SSH 连接失败：{message}") from last_error
 
-    def _deploy_connected(self, client, server, key_path, fullchain, private_key, binding):
-        client.connect(hostname=server.host, port=server.port, username=server.username, key_filename=str(key_path), timeout=self.connect_timeout, banner_timeout=self.banner_timeout, auth_timeout=self.auth_timeout, channel_timeout=self.channel_timeout, allow_agent=False, look_for_keys=False)
-        sftp = client.open_sftp()
+    def open_shell(self, server: ServerConfig):
+        client = self.connect(server)
         try:
-            self._upload_atomic(sftp, fullchain, binding.certificate_path)
-            self._upload_atomic(sftp, private_key, binding.private_key_path)
+            channel = client.invoke_shell()
+            channel.settimeout(0.2)
+            return client, channel
+        except Exception:
+            client.close()
+            raise
+
+    def deploy(self, server: ServerConfig, fullchain: Path, private_key: Path,
+               binding: DeploymentBinding | None = None) -> None:
+        binding = binding or DeploymentBinding(
+            server.certificate_path,
+            server.private_key_path,
+            server.reload_nginx,
+            server.reload_command,
+        )
+        client = self.connect(server)
+        try:
+            sftp = client.open_sftp()
+            try:
+                self._upload_atomic(sftp, fullchain, binding.certificate_path)
+                self._upload_atomic(sftp, private_key, binding.private_key_path)
+            finally:
+                sftp.close()
+            if binding.reload_nginx:
+                command = f"nginx -t && {binding.reload_command}"
+                _, stdout, stderr = client.exec_command(command)
+                code = stdout.channel.recv_exit_status()
+                if code:
+                    error = stderr.read().decode(errors="replace").strip()
+                    raise RuntimeError(f"Nginx 配置测试失败，未执行 reload：{error}")
         finally:
-            sftp.close()
-        if binding.reload_nginx:
-            command = f"nginx -t && {binding.reload_command}"
-            _, stdout, stderr = client.exec_command(command)
-            code = stdout.channel.recv_exit_status()
-            if code:
-                raise RuntimeError(f"Nginx 配置测试失败，未执行 reload：{stderr.read().decode(errors='replace').strip()}")
+            client.close()
 
     @staticmethod
     def _upload_atomic(sftp, local: Path, remote: str) -> None:

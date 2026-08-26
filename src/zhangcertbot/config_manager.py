@@ -57,7 +57,7 @@ class ServerConfig:
     reload_nginx: bool
     reload_command: str
     domains: list[str] = field(default_factory=list)
-
+    password: str = ""
 
 @dataclass
 class DomainConfig:
@@ -124,7 +124,7 @@ class ConfigManager:
                             section["username"], ssh.getboolean("enabled", False), ssh.get("private_key", ""),
                             deploy.get("certificate_path", ""), deploy.get("private_key_path", ""),
                             deploy.getboolean("reload_nginx", True), deploy.get("reload_command", "systemctl reload nginx"),
-                            split_csv(certificates.get("domains", "")))
+                            split_csv(certificates.get("domains", "")), ssh.get("password", ""))
 
     def load_domain(self, path: Path) -> DomainConfig:
         parser = self._read(path)
@@ -138,7 +138,7 @@ class ConfigManager:
             raise ValueError(f"{path.name}：environment 必须是 production 或 staging")
         names = validate_domains(split_csv(domain.get("domains", domain.get("name", ""))))
         return DomainConfig(path, domain.get("name", names[0]), names, domain.getboolean("wildcard", False),
-                            environment, letsencrypt["email"], letsencrypt.get("cert_name", names[0]),
+                            environment, letsencrypt.get("email", ""), letsencrypt.get("cert_name", names[0]),
                             cloudflare.get("api_token", ""), cloudflare.get("zone", ""),
                             resolve_path(certificate.get("output_dir", f"data/certificates/{names[0]}"), self.root),
                             server.getboolean("deploy", False), server.get("server", ""),
@@ -183,10 +183,12 @@ class ConfigManager:
             handle.write("# ZhangCertbot 服务器配置；每个字段均可按需修改。\n\n")
             server = values["server"]
             ssh = values["ssh"]
-            deploy = values["deploy"]
+            if not ssh.get("private_key", "").strip() and not ssh.get("password", "").strip():
+                raise ValueError("SSH 私钥或密码至少需要配置一个")
             certificates = values.get("certificates", {})
             handle.write(f"[server]\n# 服务器显示名称\nname = {server['name']}\n# SSH 地址\nhost = {server['host']}\n# SSH 端口\nport = {server['port']}\n# SSH 用户名\nusername = {server['username']}\n\n")
-            handle.write(f"[ssh]\n# 是否启用自动 SSH 上传\nenabled = {ssh['enabled']}\n# SSH 私钥路径\nprivate_key = {ssh['private_key']}\n\n")
+            handle.write(f"[ssh]\n# 是否启用自动 SSH 上传\nenabled = {ssh['enabled']}\n# SSH 私钥路径（可选）\nprivate_key = {ssh['private_key']}\n# SSH 密码（可选，与私钥至少配置一个）\npassword = {ssh.get('password', '')}\n\n")
+            deploy = values["deploy"]
             handle.write(f"[deploy]\n# fullchain.pem 目标路径\ncertificate_path = {deploy['certificate_path']}\n# privkey.pem 目标路径\nprivate_key_path = {deploy['private_key_path']}\n# 是否在 nginx -t 成功后 reload\nreload_nginx = {deploy['reload_nginx']}\n# reload 命令\nreload_command = {deploy['reload_command']}\n\n")
             handle.write(f"[certificates]\n# 关联的域名配置文件\ndomains = {certificates.get('domains', '')}\n")
         return path

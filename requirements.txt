@@ -2,3 +2,4 @@ certbot
 certbot-dns-cloudflare
 paramiko
 httpx[socks]
+cryptography

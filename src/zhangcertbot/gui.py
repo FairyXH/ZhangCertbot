@@ -1,15 +1,23 @@
 from __future__ import annotations
 
+import os
+import socket
 import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
+
+try:
+    import paramiko
+except ImportError:
+    paramiko = None
 
 from .batch_manager import BatchProcessor, BatchSettings
 from .certbot_runner import CertbotRunner
 from .certificate_manager import CertificateManager, certificate_files
 from .config_manager import ConfigManager, mask_secret, validate_domains
 from .proxy_manager import ProxyConfig, ProxyManager
+from .ssh_manager import SSHManager
 
 
 class ZhangCertbotGUI:
@@ -82,7 +90,7 @@ class ZhangCertbotGUI:
         self.domain_list.configure(yscrollcommand=domain_scroll.set)
         buttons = ttk.Frame(right)
         buttons.grid(row=2, column=0, sticky="ew", pady=(0, 8))
-        for text, command in (("新建孤立域名", self.new_orphan), ("新建服务器部署域名", self.new_deploy_domain), ("申请当前", self.issue_current), ("续期当前", self.renew_current), ("上传当前", self.deploy_current), ("保存域名", self.save_domain), ("删除域名", self.delete_domain)):
+        for text, command in (("新建孤立域名", self.new_orphan), ("新建服务器部署域名", self.new_deploy_domain), ("申请当前", self.issue_current), ("续期当前", self.renew_current), ("上传当前", self.deploy_current), ("打开 SSH", self.open_ssh_current), ("保存域名", self.save_domain), ("删除域名", self.delete_domain)):
             ttk.Button(buttons, text=text, command=command).pack(side="left", padx=2)
         lower = ttk.PanedWindow(right, orient="horizontal")
         lower.grid(row=3, column=0, sticky="nsew", pady=(10, 0))
@@ -101,12 +109,12 @@ class ZhangCertbotGUI:
         self.form.columnconfigure(1, weight=1)
         self.entries: dict[str, ttk.Entry] = {}
         self.field_labels: dict[str, ttk.Label] = {}
-        fields = [("域名（前缀 * 表示泛域名）", "name"), ("Cloudflare Token", "token"), ("服务器名称", "server_name"), ("服务器 IP", "host"), ("SSH 端口", "port"), ("SSH 私钥", "private_key"), ("远程 fullchain 路径", "certificate_path"), ("远程 privkey 路径", "private_key_path"), ("重载命令（可选）", "reload_command")]
+        fields = [("域名（前缀 * 表示泛域名）", "name"), ("Cloudflare Token", "token"), ("邮箱（可选）", "email"), ("服务器名称", "server_name"), ("服务器 IP", "host"), ("SSH 端口", "port"), ("SSH 用户名", "username"), ("SSH 密码（可选）", "password"), ("SSH 私钥", "private_key"), ("远程 fullchain 路径", "certificate_path"), ("远程 privkey 路径", "private_key_path"), ("重载命令（可选）", "reload_command")]
         for row, (label, key) in enumerate(fields):
             label_widget = ttk.Label(self.form, text=label)
             label_widget.grid(row=row, column=0, sticky="w", padx=(0, 8), pady=3)
             self.field_labels[key] = label_widget
-            entry = ttk.Entry(self.form)
+            entry = ttk.Entry(self.form, show="*" if key == "password" else None)
             entry.grid(row=row, column=1, sticky="ew", pady=3)
             self.entries[key] = entry
             if key == "private_key":
@@ -318,7 +326,7 @@ class ZhangCertbotGUI:
 
     def _set_deploy_fields_visible(self, visible: bool):
         state = "normal" if visible else "disabled"
-        for key in ("server_name", "host", "port", "private_key", "certificate_path", "private_key_path", "reload_command"):
+        for key in ("server_name", "host", "port", "username", "password", "private_key", "certificate_path", "private_key_path", "reload_command"):
             self.entries[key].configure(state=state)
             self.field_labels[key].configure(state=state)
 
@@ -339,12 +347,15 @@ class ZhangCertbotGUI:
             self._replace_entry("server_name", server.name)
             self._replace_entry("host", server.host)
             self._replace_entry("port", str(server.port))
+            self._replace_entry("username", server.username or "root")
+            self._replace_entry("password", server.password)
             self._replace_entry("private_key", server.private_key)
             self._replace_entry("certificate_path", server.certificate_path)
             self._replace_entry("private_key_path", server.private_key_path)
             self._replace_entry("reload_command", server.reload_command)
             self.auto_upload.set(True); self.auto_reload.set(server.reload_nginx)
         else:
+            self._replace_entry("username", "root")
             self.entries["port"].insert(0, "22")
 
     def load_domain(self, domain):
@@ -353,12 +364,14 @@ class ZhangCertbotGUI:
         self._clear_form()
         self._replace_entry("name", domain.name)
         self._replace_entry("token", domain.api_token)
+        self._replace_entry("email", domain.email)
         self.auto_upload.set(domain.deploy)
         if domain.deploy:
             server = next((x for x in self.manager.list_servers() if x.file.name == domain.server_file), None)
             self.new_deploy_domain(server)
             self._replace_entry("name", domain.name)
             self._replace_entry("token", domain.api_token)
+            self._replace_entry("email", domain.email)
             binding = domain.binding_for(domain.server_file)
             self._replace_entry("certificate_path", binding.certificate_path)
             self._replace_entry("private_key_path", binding.private_key_path)
@@ -368,6 +381,7 @@ class ZhangCertbotGUI:
             self.new_orphan()
             self._replace_entry("name", domain.name)
             self._replace_entry("token", domain.api_token)
+            self._replace_entry("email", domain.email)
 
     def save_domain(self):
         try:
@@ -378,13 +392,13 @@ class ZhangCertbotGUI:
             token = self.entries["token"].get().strip()
             if not token: raise ValueError("Cloudflare Token 不能为空")
             if self.mode.get() == "orphan":
-                values = {"name": name, "domain": {"name": name, "wildcard": str(raw_name.startswith("*.")).lower(), "domains": ", ".join(names)}, "letsencrypt": {"environment": "production", "email": "", "cert_name": base_name}, "cloudflare": {"api_token": token, "zone": base_name}, "certificate": {"output_dir": f"data/certificates/{base_name}", "certbot_extra": ""}, "server": {"deploy": "false", "server": ""}}
+                values = {"name": name, "domain": {"name": name, "wildcard": str(raw_name.startswith("*.")).lower(), "domains": ", ".join(names)}, "letsencrypt": {"environment": "production", "email": self.entries["email"].get().strip(), "cert_name": base_name}, "cloudflare": {"api_token": token, "zone": base_name}, "certificate": {"output_dir": f"data/certificates/{base_name}", "certbot_extra": ""}, "server": {"deploy": "false", "server": ""}}
             else:
                 server_name = self.entries["server_name"].get().strip()
                 if not server_name: raise ValueError("服务器名称不能为空")
-                server_values = {"server": {"name": server_name, "host": self.entries["host"].get().strip(), "port": self.entries["port"].get().strip() or "22", "username": "root"}, "ssh": {"enabled": "true", "private_key": self.entries["private_key"].get().strip()}, "deploy": {"certificate_path": self.entries["certificate_path"].get().strip(), "private_key_path": self.entries["private_key_path"].get().strip(), "reload_nginx": str(self.auto_reload.get()).lower(), "reload_command": self.entries["reload_command"].get().strip() or "systemctl reload nginx"}, "certificates": {"domains": ""}}
+                server_values = {"server": {"name": server_name, "host": self.entries["host"].get().strip(), "port": self.entries["port"].get().strip() or "22", "username": self.entries["username"].get().strip() or "root"}, "ssh": {"enabled": "true", "private_key": self.entries["private_key"].get().strip(), "password": self.entries["password"].get()}, "deploy": {"certificate_path": self.entries["certificate_path"].get().strip(), "private_key_path": self.entries["private_key_path"].get().strip(), "reload_nginx": str(self.auto_reload.get()).lower(), "reload_command": self.entries["reload_command"].get().strip() or "systemctl reload nginx"}, "certificates": {"domains": ""}}
                 server_path = self.manager.write_server(server_values)
-                values = {"name": name, "domain": {"name": name, "wildcard": str(raw_name.startswith("*.")).lower(), "domains": ", ".join(names)}, "letsencrypt": {"environment": "production", "email": "", "cert_name": base_name}, "cloudflare": {"api_token": token, "zone": base_name}, "certificate": {"output_dir": f"data/certificates/{base_name}", "certbot_extra": ""}, "server": {"deploy": str(self.auto_upload.get()).lower(), "server": server_path.name}, "deploy_bindings": {server_path.name: {"certificate_path": self.entries["certificate_path"].get().strip(), "private_key_path": self.entries["private_key_path"].get().strip(), "reload_nginx": str(self.auto_reload.get()).lower(), "reload_command": self.entries["reload_command"].get().strip() or "systemctl reload nginx"}}}
+                values = {"name": name, "domain": {"name": name, "wildcard": str(raw_name.startswith("*.")).lower(), "domains": ", ".join(names)}, "letsencrypt": {"environment": "production", "email": self.entries["email"].get().strip(), "cert_name": base_name}, "cloudflare": {"api_token": token, "zone": base_name}, "certificate": {"output_dir": f"data/certificates/{base_name}", "certbot_extra": ""}, "server": {"deploy": str(self.auto_upload.get()).lower(), "server": server_path.name}, "deploy_bindings": {server_path.name: {"certificate_path": self.entries["certificate_path"].get().strip(), "private_key_path": self.entries["private_key_path"].get().strip(), "reload_nginx": str(self.auto_reload.get()).lower(), "reload_command": self.entries["reload_command"].get().strip() or "systemctl reload nginx"}}}
             path = self.manager.write_domain(values)
             self.log(f"已保存：{path.name}，Token：{mask_secret(token)}")
             self.show_servers() if self.mode.get() == "deploy" else self.show_orphans()
@@ -419,9 +433,70 @@ class ZhangCertbotGUI:
         if not self.selected_domain_file: return None
         return next((x for x in self.manager.list_domains() if x.file.name == self.selected_domain_file), None)
 
+    def open_ssh_current(self):
+        domain = self.current_domain()
+        if domain is None or not domain.deploy:
+            messagebox.showwarning("无法打开 SSH", "请先选择一个服务器部署域名。")
+            return
+        server = next((item for item in self.manager.list_servers() if item.file.name == domain.server_file), None)
+        if server is None:
+            messagebox.showerror("打开 SSH 失败", f"服务器配置不存在：{domain.server_file}")
+            return
+        if paramiko is None:
+            messagebox.showerror("打开 SSH 失败", "未安装 Paramiko，请先安装项目依赖。")
+            return
+        dialog = tk.Toplevel(self.window)
+        dialog.title(f"SSH 终端 - {server.name}")
+        dialog.geometry("900x600")
+        dialog.rowconfigure(0, weight=1)
+        dialog.columnconfigure(0, weight=1)
+        output = tk.Text(dialog, wrap="word", state="disabled", bg="#111111", fg="#eeeeee", insertbackground="#ffffff")
+        output.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=8, pady=8)
+        scroll = ttk.Scrollbar(dialog, orient="vertical", command=output.yview)
+        scroll.grid(row=0, column=2, sticky="ns", pady=8)
+        output.configure(yscrollcommand=scroll.set)
+        command = tk.StringVar()
+        entry = ttk.Entry(dialog, textvariable=command)
+        entry.grid(row=1, column=0, sticky="ew", padx=(8, 4), pady=(0, 8))
+        dialog.columnconfigure(0, weight=1)
+        session = {}
+        def append(text):
+            if dialog.winfo_exists():
+                output.configure(state="normal")
+                output.insert("end", text)
+                output.see("end")
+                output.configure(state="disabled")
+        def send(_event=None):
+            value = command.get()
+            channel = session.get("channel")
+            if value and channel:
+                command.set("")
+                try: channel.send(value + "\n")
+                except Exception as exc: append(f"发送失败：{exc}\n")
+        def worker():
+            client = None
+            try:
+                client, channel = SSHManager().open_shell(server)
+                session["channel"] = channel
+                self.window.after(0, append, f"已连接：{server.username or 'root'}@{server.host}:{server.port}\n")
+                while dialog.winfo_exists():
+                    try:
+                        data = channel.recv(4096)
+                        if data: self.window.after(0, append, data.decode(errors="replace"))
+                    except (socket.timeout, TimeoutError): continue
+                    except Exception as exc: self.window.after(0, append, f"\nSSH 会话结束：{exc}\n"); break
+            except Exception as exc: self.window.after(0, append, f"连接失败：{exc}\n")
+            finally:
+                if client: client.close()
+        entry.bind("<Return>", send)
+        ttk.Button(dialog, text="发送", command=send).grid(row=1, column=1, padx=4, pady=(0, 8))
+        threading.Thread(target=worker, daemon=True).start()
+        entry.focus_set()
+
     def issue_current(self):
         domain = self.current_domain()
-        if domain: self._async(lambda callback: self._processor().issue([domain], self._settings(), callback), "申请")
+        if domain:
+            self._async(lambda callback: self._processor().issue([domain], self._settings(), callback), "申请")
 
     def renew_current(self):
         domain = self.current_domain()
