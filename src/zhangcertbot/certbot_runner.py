@@ -4,6 +4,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from .config_manager import ConfigManager, DomainConfig
 
@@ -40,22 +41,30 @@ class CertbotRunner:
     def version(self) -> CertbotResult:
         return self.run(["--version"])
 
-    def run(self, arguments: list[str]) -> CertbotResult:
+    def run(self, arguments: list[str], on_output: Callable[[str], None] | None = None) -> CertbotResult:
         command = self.executable.split() + arguments if self.executable.startswith("python -m certbot") else [self.executable, *arguments]
         try:
-            completed = subprocess.run(command, cwd=self.root, text=True, capture_output=True, check=False)
+            if on_output is None:
+                completed = subprocess.run(command, cwd=self.root, text=True, capture_output=True, check=False)
+                return CertbotResult(completed.returncode, completed.stdout, completed.stderr)
+            process = subprocess.Popen(command, cwd=self.root, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=1)
+            output: list[str] = []
+            assert process.stdout is not None
+            for line in process.stdout:
+                output.append(line)
+                on_output(line.rstrip())
+            return CertbotResult(process.wait(), "\n".join(output), "")
         except FileNotFoundError as exc:
             return CertbotResult(127, "", f"未找到 Certbot，请先安装 Certbot：{exc}")
-        return CertbotResult(completed.returncode, completed.stdout, completed.stderr)
 
     def _common(self) -> list[str]:
         self.certbot_dir.mkdir(parents=True, exist_ok=True)
         return ["--config-dir", str(self.certbot_dir), "--work-dir", str(self.certbot_dir / "work"),
                 "--logs-dir", str(self.root / "logs" / "certbot"), "--non-interactive"]
 
-    def issue(self, domain: DomainConfig) -> CertbotResult:
+    def issue(self, domain: DomainConfig, on_output: Callable[[str], None] | None = None) -> CertbotResult:
         credentials = self.manager.credentials_path(domain)
-        args = ["certonly", *self._common(), "--dns-cloudflare", "--dns-cloudflare-credentials", str(credentials)]
+        args = ["certonly", "-v", "--no-verify-ssl", *self._common(), "--dns-cloudflare", "--dns-cloudflare-credentials", str(credentials)]
         if domain.email:
             args.extend(["--email", domain.email])
         else:
@@ -64,20 +73,22 @@ class CertbotRunner:
         for name in domain.domains:
             args.extend(["-d", name])
         args.extend(domain.certbot_extra)
-        return self.run(args)
+        return self.run(args, on_output=on_output)
 
-    def renew(self, dry_run: bool = False, force: bool = False, cert_name: str = "") -> CertbotResult:
-        args = ["renew", *self._common()]
+    def renew(self, dry_run: bool = False, force: bool = False, cert_name: str = "", on_output: Callable[[str], None] | None = None) -> CertbotResult:
+        args = ["renew", "-v", "--no-verify-ssl", *self._common()]
         if cert_name:
             args.extend(["--cert-name", cert_name])
         if dry_run:
             args.append("--dry-run")
         if force:
             args.append("--force-renewal")
-        return self.run(args)
+        if on_output:
+            on_output("Certbot：开始执行证书续期")
+        return self.run(args, on_output=on_output)
 
     def certificates(self) -> CertbotResult:
-        return self.run(["certificates", *self._common()])
+        return self.run(["certificates", "-v", "--no-verify-ssl", *self._common()])
 
     def live_paths(self, domain: DomainConfig) -> tuple[Path, Path]:
         live = self.certbot_dir / "live" / domain.cert_name

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import inspect
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Callable, Iterable
@@ -36,6 +37,10 @@ class BatchItemResult:
     deployed: bool = False
 
 
+def callback_line(callback, domain_name: str):
+    if callback is None:
+        return None
+    return lambda line: callback(BatchItemResult(domain_name, False, line))
 class BatchProcessor:
     def __init__(self, manager: ConfigManager, runner: CertbotRunner | None = None,
                  deployer: DeployManager | None = None):
@@ -51,7 +56,14 @@ class BatchProcessor:
         def one(domain: DomainConfig) -> BatchItemResult:
             last_message = "Certbot 申请失败"
             for attempt in range(1, settings.attempts + 1):
-                result = self.runner.issue(domain)
+                def stream(line: str):
+                    self._emit(callback, BatchItemResult(domain.name, False, line))
+
+                runner_method = self.runner.issue
+                if "on_output" in inspect.signature(runner_method).parameters:
+                    result = runner_method(domain, on_output=stream)
+                else:
+                    result = runner_method(domain)
                 if result.ok:
                     try:
                         self.deployer.certificates.export(domain)
@@ -62,7 +74,7 @@ class BatchProcessor:
                         return BatchItemResult(domain.name, True, "申请成功", deployed)
                     except Exception as exc:
                         return BatchItemResult(domain.name, False, str(exc))
-                last_message = result.stderr.strip() or "Certbot 申请失败"
+                last_message = result.stderr.strip() or result.stdout.strip() or "Certbot 申请失败"
                 if attempt < settings.attempts:
                     self._emit(callback, BatchItemResult(domain.name, False, f"申请失败，第 {attempt} 次重试：{last_message}"))
                     if settings.retry_delay > 0:
@@ -74,10 +86,14 @@ class BatchProcessor:
     def renew(self, domains: Iterable[DomainConfig], settings: BatchSettings,
               force: bool = False, callback: Callable[[BatchItemResult], None] | None = None) -> list[BatchItemResult]:
         domain_list = list(domains)
+        def stream(line: str):
+            if callback:
+                callback(BatchItemResult(domain_list[0].name if len(domain_list) == 1 else "批量续期", False, line))
+
         if len(domain_list) == 1:
-            result = self.runner.renew(force=force, cert_name=domain_list[0].cert_name)
+            result = self.runner.renew(force=force, cert_name=domain_list[0].cert_name, on_output=stream)
         else:
-            result = self.runner.renew(force=force)
+            result = self.runner.renew(force=force, on_output=stream)
         certificates = self.deployer.certificates
 
         def one(domain: DomainConfig) -> BatchItemResult:
@@ -95,7 +111,7 @@ class BatchProcessor:
 
         if result.ok:
             return self._map(domain_list, settings, one, callback)
-        message = result.stderr.strip() or "Certbot 续期失败"
+        message = result.stderr.strip() or result.stdout.strip() or "Certbot 续期失败"
         failures = [BatchItemResult(domain.name, False, message) for domain in domain_list]
         for item in failures:
             self._emit(callback, item)

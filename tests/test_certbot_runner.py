@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from src.zhangcertbot.certbot_runner import CertbotRunner, DIRECTORIES
-from src.zhangcertbot.config_manager import ConfigManager, DomainConfig
+from src.zhangcertbot.config_manager import DomainConfig
 
 
 def make_domain(tmp_path: Path, environment: str = "production", email: str = "admin@example.com") -> DomainConfig:
@@ -10,12 +10,14 @@ def make_domain(tmp_path: Path, environment: str = "production", email: str = "a
                         tmp_path / "output", False, "")
 
 
-def test_issue_command_uses_credentials_and_environment(tmp_path: Path, monkeypatch):
+def test_issue_command_uses_verbose_and_insecure_ssl_flags(tmp_path: Path, monkeypatch):
     runner = CertbotRunner(tmp_path, executable="certbot")
     captured = {}
-    monkeypatch.setattr(runner, "run", lambda arguments: captured.setdefault("args", arguments))
+    monkeypatch.setattr(runner, "run", lambda arguments, **kwargs: captured.setdefault("args", arguments))
     runner.issue(make_domain(tmp_path, "staging"))
     args = captured["args"]
+    assert "-v" in args
+    assert "--no-verify-ssl" in args
     assert "--dns-cloudflare" in args
     assert "--dns-cloudflare-credentials" in args
     assert DIRECTORIES["staging"] in args
@@ -27,7 +29,7 @@ def test_issue_command_uses_credentials_and_environment(tmp_path: Path, monkeypa
 def test_issue_without_email_still_agrees_to_terms(tmp_path: Path, monkeypatch):
     runner = CertbotRunner(tmp_path, executable="certbot")
     captured = {}
-    monkeypatch.setattr(runner, "run", lambda arguments: captured.setdefault("args", arguments))
+    monkeypatch.setattr(runner, "run", lambda arguments, **kwargs: captured.setdefault("args", arguments))
     runner.issue(make_domain(tmp_path, email=""))
     args = captured["args"]
     assert "--register-unsafely-without-email" in args
@@ -37,14 +39,16 @@ def test_issue_without_email_still_agrees_to_terms(tmp_path: Path, monkeypatch):
 def test_renew_does_not_force_by_default(tmp_path: Path, monkeypatch):
     runner = CertbotRunner(tmp_path, executable="certbot")
     captured = {}
-    monkeypatch.setattr(runner, "run", lambda arguments: captured.setdefault("args", arguments))
+    monkeypatch.setattr(runner, "run", lambda arguments, **kwargs: captured.setdefault("args", arguments))
     runner.renew()
     assert captured["args"][0] == "renew"
+    assert "-v" in captured["args"]
+    assert "--no-verify-ssl" in captured["args"]
     assert "--force-renewal" not in captured["args"]
 
 
 def test_wildcard_domain_name_round_trips(tmp_path: Path):
-    manager = ConfigManager(tmp_path)
+    manager = __import__("src.zhangcertbot.config_manager", fromlist=["ConfigManager"]).ConfigManager(tmp_path)
     path = manager.write_domain({
         "name": "*.zhangfairy.ccwu.cc",
         "domain": {"name": "*.zhangfairy.ccwu.cc", "wildcard": "true", "domains": "zhangfairy.ccwu.cc, *.zhangfairy.ccwu.cc"},
@@ -59,6 +63,7 @@ def test_wildcard_domain_name_round_trips(tmp_path: Path):
 
 
 def test_config_manager_deletes_server_and_domain(tmp_path: Path):
+    from src.zhangcertbot.config_manager import ConfigManager
     manager = ConfigManager(tmp_path)
     server = manager.write_server({
         "server": {"name": "server", "host": "192.0.2.1", "port": "22", "username": "root"},

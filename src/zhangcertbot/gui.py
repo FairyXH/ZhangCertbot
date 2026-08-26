@@ -354,7 +354,7 @@ class ZhangCertbotGUI:
     def _settings(self): return BatchSettings(self.parallel.get(), max(1, int(self.workers.get())), max(0, int(self.retries.get())))
     def _processor(self): return BatchProcessor(self.manager)
     def _async(self, function, label):
-        self.log(f"[{label}] 开始执行")
+        self.log(f"[{label}] 开始执行 Certbot（详细模式 -v，已关闭 SSL 校验）")
         def progress(item):
             self.window.after(0, lambda: self.log(f"[{label}] {item.domain}：{item.message}{'，已部署' if item.deployed else ''}"))
         def work():
