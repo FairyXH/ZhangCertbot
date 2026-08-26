@@ -1,7 +1,8 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 from src.zhangcertbot.certbot_runner import CertbotRunner, DIRECTORIES
-from src.zhangcertbot.config_manager import DomainConfig
+from src.zhangcertbot.config_manager import ConfigManager, DomainConfig
 
 
 def make_domain(tmp_path: Path, environment: str = "production", email: str = "admin@example.com") -> DomainConfig:
@@ -48,7 +49,7 @@ def test_renew_does_not_force_by_default(tmp_path: Path, monkeypatch):
 
 
 def test_wildcard_domain_name_round_trips(tmp_path: Path):
-    manager = __import__("src.zhangcertbot.config_manager", fromlist=["ConfigManager"]).ConfigManager(tmp_path)
+    manager = ConfigManager(tmp_path)
     path = manager.write_domain({
         "name": "*.zhangfairy.ccwu.cc",
         "domain": {"name": "*.zhangfairy.ccwu.cc", "wildcard": "true", "domains": "zhangfairy.ccwu.cc, *.zhangfairy.ccwu.cc"},
@@ -62,8 +63,24 @@ def test_wildcard_domain_name_round_trips(tmp_path: Path):
     assert loaded.domains == ["zhangfairy.ccwu.cc", "*.zhangfairy.ccwu.cc"]
 
 
+def test_streaming_run_treats_windows_bad_fd_after_success_as_eof(tmp_path: Path, monkeypatch):
+    runner = CertbotRunner(tmp_path, executable="certbot")
+
+    class Stream:
+        def __iter__(self):
+            yield "Successfully received certificate.\n"
+            raise OSError(9, "Bad file descriptor")
+
+    process = SimpleNamespace(stdout=Stream(), wait=lambda: 0)
+    monkeypatch.setattr("subprocess.Popen", lambda *args, **kwargs: process)
+    lines = []
+    result = runner.run(["certonly"], on_output=lines.append)
+    assert result.code == 0
+    assert "Successfully received certificate." in result.stdout
+    assert lines == ["Successfully received certificate."]
+
+
 def test_config_manager_deletes_server_and_domain(tmp_path: Path):
-    from src.zhangcertbot.config_manager import ConfigManager
     manager = ConfigManager(tmp_path)
     server = manager.write_server({
         "server": {"name": "server", "host": "192.0.2.1", "port": "22", "username": "root"},

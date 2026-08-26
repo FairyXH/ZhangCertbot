@@ -63,9 +63,13 @@ class CertbotRunner:
             process = subprocess.Popen(command, cwd=self.root, env=self.proxy.environment(), text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=1)
             output: list[str] = []
             assert process.stdout is not None
-            for line in process.stdout:
-                output.append(line)
-                on_output(line.rstrip())
+            try:
+                for line in process.stdout:
+                    output.append(line)
+                    on_output(line.rstrip())
+            except OSError as exc:
+                if getattr(exc, "errno", None) != 9:
+                    raise
             return CertbotResult(process.wait(), "\n".join(output), "")
         except FileNotFoundError as exc:
             return CertbotResult(127, "", f"未找到 Certbot，请先安装 Certbot：{exc}")
