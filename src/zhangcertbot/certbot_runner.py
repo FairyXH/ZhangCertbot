@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Callable
 
 from .config_manager import ConfigManager, DomainConfig
+from .proxy_manager import ProxyManager
 
 DIRECTORIES = {
     "production": "https://acme-v02.api.letsencrypt.org/directory",
@@ -31,6 +32,8 @@ class CertbotRunner:
         self.manager = ConfigManager(self.root)
         self.executable = executable or self._find_executable()
         self.certbot_dir = self.root / "data" / "certbot"
+        self.proxy_manager = ProxyManager(self.root)
+        self.proxy = self.proxy_manager.load()
 
     def _find_executable(self) -> str:
         found = shutil.which("certbot") or shutil.which("certbot.exe")
@@ -45,9 +48,9 @@ class CertbotRunner:
         command = self.executable.split() + arguments if self.executable.startswith("python -m certbot") else [self.executable, *arguments]
         try:
             if on_output is None:
-                completed = subprocess.run(command, cwd=self.root, text=True, capture_output=True, check=False)
+                completed = subprocess.run(command, cwd=self.root, env=self.proxy.environment(), text=True, capture_output=True, check=False)
                 return CertbotResult(completed.returncode, completed.stdout, completed.stderr)
-            process = subprocess.Popen(command, cwd=self.root, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=1)
+            process = subprocess.Popen(command, cwd=self.root, env=self.proxy.environment(), text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=1)
             output: list[str] = []
             assert process.stdout is not None
             for line in process.stdout:

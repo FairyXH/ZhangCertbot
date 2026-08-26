@@ -8,6 +8,7 @@ from tkinter import filedialog, messagebox, ttk
 from .batch_manager import BatchProcessor, BatchSettings
 from .certificate_manager import certificate_files
 from .config_manager import ConfigManager, mask_secret, validate_domains
+from .proxy_manager import ProxyConfig, ProxyManager
 
 
 class ZhangCertbotGUI:
@@ -15,6 +16,7 @@ class ZhangCertbotGUI:
         self.root = root.resolve()
         self.manager = ConfigManager(self.root)
         self.manager.ensure_dirs()
+        self.proxy_manager = ProxyManager(self.root)
         self.window = tk.Tk()
         self.window.title("ZhangCertbot - 证书管理")
         self.window.geometry("1250x780")
@@ -36,6 +38,7 @@ class ZhangCertbotGUI:
         ttk.Button(toolbar, text="新建孤立域名", command=self.new_orphan).pack(side="left", padx=3)
         ttk.Button(toolbar, text="新建服务器部署域名", command=self.new_deploy_domain).pack(side="left", padx=3)
         ttk.Button(toolbar, text="刷新", command=self.show_servers).pack(side="left", padx=3)
+        ttk.Button(toolbar, text="代理", command=self.open_proxy_dialog).pack(side="left", padx=3)
         ttk.Label(toolbar, text="批量并发").pack(side="left", padx=(24, 3))
         ttk.Checkbutton(toolbar, text="启用", variable=self.parallel).pack(side="left")
         ttk.Label(toolbar, text="最大线程数").pack(side="left", padx=(8, 3))
@@ -183,7 +186,41 @@ class ZhangCertbotGUI:
         self.output.delete("1.0", "end")
         self.output.configure(state="disabled")
 
-    def choose_key(self):
+    def open_proxy_dialog(self):
+        config = self.proxy_manager.load()
+        dialog = tk.Toplevel(self.window)
+        dialog.title("SOCKS5 代理设置")
+        dialog.geometry("430x220")
+        dialog.resizable(False, False)
+        dialog.transient(self.window)
+        dialog.grab_set()
+        enabled = tk.BooleanVar(value=config.enabled)
+        host = tk.StringVar(value=config.host)
+        port = tk.IntVar(value=config.port)
+        ttk.Checkbutton(dialog, text="启用 SOCKS5 代理", variable=enabled).grid(row=0, column=0, columnspan=2, sticky="w", padx=18, pady=(18, 10))
+        ttk.Label(dialog, text="代理地址").grid(row=1, column=0, sticky="w", padx=18, pady=6)
+        ttk.Entry(dialog, textvariable=host, width=28).grid(row=1, column=1, padx=18, pady=6)
+        ttk.Label(dialog, text="代理端口").grid(row=2, column=0, sticky="w", padx=18, pady=6)
+        ttk.Spinbox(dialog, from_=1, to=65535, textvariable=port, width=26).grid(row=2, column=1, padx=18, pady=6)
+        ttk.Label(dialog, text="格式：socks5h://地址:端口").grid(row=3, column=0, columnspan=2, sticky="w", padx=18, pady=4)
+        def save():
+            try:
+                value = ProxyConfig(enabled.get(), host.get().strip(), int(port.get()))
+                if not value.host:
+                    raise ValueError("代理地址不能为空")
+                if not 1 <= value.port <= 65535:
+                    raise ValueError("代理端口必须在 1-65535 范围内")
+                self.proxy_manager.save(value)
+                self.log(f"SOCKS5 代理已{'启用' if value.enabled else '关闭'}：{value.host}:{value.port}")
+                dialog.destroy()
+            except Exception as exc:
+                messagebox.showerror("代理设置失败", str(exc), parent=dialog)
+        buttons = ttk.Frame(dialog)
+        buttons.grid(row=4, column=0, columnspan=2, sticky="e", padx=18, pady=14)
+        ttk.Button(buttons, text="保存", command=save).pack(side="left", padx=4)
+        ttk.Button(buttons, text="取消", command=dialog.destroy).pack(side="left", padx=4)
+
+
         path = filedialog.askopenfilename(title="选择 SSH 私钥文件")
         if path:
             self.entries["private_key"].delete(0, "end")

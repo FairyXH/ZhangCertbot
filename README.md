@@ -153,7 +153,31 @@ GUI 左侧树状列表按以下层级展示：
 
 不绑定服务器的域名进入“孤立域名（不部署）”列表，只执行本地 Certbot 申请、续期和导出，不执行 SSH 上传或 Nginx reload。
 
-## 实时日志
+## SOCKS5 代理
+
+GUI 顶部提供“代理”按钮，点击后打开 SOCKS5 设置窗口：
+
+- 启用/关闭代理
+- 代理地址
+- 代理端口
+- 保存和取消
+
+设置保存到：
+
+```text
+data/runtime/proxy.ini
+```
+
+启用后，Certbot 子进程会继承：
+
+```text
+HTTP_PROXY=socks5h://地址:端口
+HTTPS_PROXY=socks5h://地址:端口
+ALL_PROXY=socks5h://地址:端口
+```
+
+使用 `socks5h` 会让代理负责 DNS 解析，适合 Clash、VPN、Proxifier 等环境。代理设置只影响 ZhangCertbot 启动的 Certbot 子进程，不修改系统全局代理。
+
 
 日志示例：
 
