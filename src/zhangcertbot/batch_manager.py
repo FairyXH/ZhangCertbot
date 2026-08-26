@@ -64,10 +64,6 @@ class BatchProcessor:
             result = self.runner.renew(force=force, cert_name=domain_list[0].cert_name)
         else:
             result = self.runner.renew(force=force)
-        if not result.ok:
-            message = result.stderr.strip() or "Certbot 续期失败"
-            return [BatchItemResult(domain.name, False, message) for domain in domain_list]
-
         certificates = self.deployer.certificates
 
         def one(domain: DomainConfig) -> BatchItemResult:
@@ -83,7 +79,14 @@ class BatchProcessor:
             except Exception as exc:
                 return BatchItemResult(domain.name, False, str(exc))
 
-        return self._map(list(domains), settings, one, callback)
+        if result.ok:
+            return self._map(domain_list, settings, one, callback)
+        message = result.stderr.strip() or "Certbot 续期失败"
+        failures = [BatchItemResult(domain.name, False, message) for domain in domain_list]
+        if callback:
+            for item in failures:
+                callback(item)
+        return failures
 
     def deploy(self, domains: Iterable[DomainConfig], settings: BatchSettings,
                callback: Callable[[BatchItemResult], None] | None = None) -> list[BatchItemResult]:

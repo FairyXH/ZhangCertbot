@@ -42,6 +42,28 @@ def test_batch_issue_processes_each_domain_independently(tmp_path: Path):
     assert sorted(calls) == ["one.example", "two.example"]
 
 
+def test_batch_callback_receives_each_completed_domain(tmp_path: Path):
+    manager = ConfigManager(tmp_path)
+    domain = make_domain(tmp_path, "one.example")
+    events = []
+
+    class Runner:
+        def issue(self, item):
+            return SimpleNamespace(ok=True, stderr="")
+
+    class Certificates:
+        def export(self, item):
+            return True
+
+    class Deployer:
+        certificates = Certificates()
+
+    BatchProcessor(manager, Runner(), Deployer()).issue([domain], BatchSettings(), events.append)
+    assert len(events) == 1
+    assert events[0].domain == "one.example"
+    assert events[0].message == "申请成功"
+
+
 def test_deploy_manager_uses_domain_specific_binding(tmp_path: Path):
     manager = ConfigManager(tmp_path)
     server_path = manager.servers_dir / "server1-config.ini"

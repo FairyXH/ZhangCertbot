@@ -57,7 +57,7 @@ class ZhangCertbotGUI:
         ttk.Button(left, text="批量上传选中服务器", command=self.deploy_server).grid(row=3, column=0, sticky="ew", pady=2)
 
         right.rowconfigure(1, weight=1)
-        right.rowconfigure(4, weight=1)
+        right.rowconfigure(3, weight=1)
         right.columnconfigure(0, weight=1)
         self.domain_title = ttk.Label(right, text="请选择服务器", font=("Microsoft YaHei UI", 15, "bold"))
         self.domain_title.grid(row=0, column=0, sticky="w")
@@ -75,7 +75,14 @@ class ZhangCertbotGUI:
         buttons.grid(row=2, column=0, sticky="ew", pady=(0, 8))
         for text, command in (("新建孤立域名", self.new_orphan), ("新建服务器部署域名", self.new_deploy_domain), ("申请当前", self.issue_current), ("续期当前", self.renew_current), ("上传当前", self.deploy_current), ("保存域名", self.save_domain)):
             ttk.Button(buttons, text=text, command=command).pack(side="left", padx=2)
-        self._build_form(right)
+        lower = ttk.PanedWindow(right, orient="horizontal")
+        lower.grid(row=3, column=0, sticky="nsew", pady=(10, 0))
+        form_host = ttk.Frame(lower)
+        log_host = ttk.Frame(lower)
+        lower.add(form_host, weight=3)
+        lower.add(log_host, weight=2)
+        self._build_form(form_host)
+        self._build_log_panel(log_host)
 
     def _build_form(self, parent):
         self.form = ttk.LabelFrame(parent, text="域名配置", padding=10)
@@ -100,6 +107,22 @@ class ZhangCertbotGUI:
         self.form_mode_label = ttk.Label(self.form, text="当前模式：孤立域名")
         self.form_mode_label.grid(row=len(fields) + 2, column=1, sticky="w", pady=3)
 
+    def _build_log_panel(self, parent):
+        self.log_panel = ttk.LabelFrame(parent, text="实时日志", padding=6)
+        self.log_panel.grid(row=3, column=0, sticky="nsew", pady=(10, 0))
+        self.log_panel.rowconfigure(0, weight=1)
+        self.log_panel.columnconfigure(0, weight=1)
+        self.output = tk.Text(self.log_panel, height=8, state="disabled", wrap="word")
+        self.output.grid(row=0, column=0, sticky="nsew")
+        scroll = ttk.Scrollbar(self.log_panel, orient="vertical", command=self.output.yview)
+        scroll.grid(row=0, column=1, sticky="ns")
+        self.output.configure(yscrollcommand=scroll.set)
+        ttk.Button(self.log_panel, text="清空日志", command=self.clear_log).grid(row=1, column=0, sticky="e", pady=(5, 0))
+
+    def clear_log(self):
+        self.output.configure(state="normal")
+        self.output.delete("1.0", "end")
+        self.output.configure(state="disabled")
     def choose_key(self):
         path = filedialog.askopenfilename(title="选择 SSH 私钥文件")
         if path:
@@ -227,11 +250,15 @@ class ZhangCertbotGUI:
     def _settings(self): return BatchSettings(self.parallel.get(), max(1, int(self.workers.get())))
     def _processor(self): return BatchProcessor(self.manager)
     def _async(self, function, label):
+        self.log(f"[{label}] 开始执行")
+        def progress(item):
+            self.window.after(0, lambda: self.log(f"[{label}] {item.domain}：{item.message}{'，已部署' if item.deployed else ''}"))
         def work():
             try:
-                results = function()
-                self.window.after(0, lambda: [self.log(f"{label}：{x.domain} - {x.message}{'，已部署' if x.deployed else ''}") for x in results])
-            except Exception as exc: self.window.after(0, lambda: self.log(f"{label}失败：{exc}"))
+                results = function(progress)
+                self.window.after(0, lambda: self.log(f"[{label}] 完成，共处理 {len(results)} 个域名"))
+            except Exception as exc:
+                self.window.after(0, lambda: self.log(f"[{label}] 失败：{exc}"))
         threading.Thread(target=work, daemon=True).start()
 
     def current_domain(self):
@@ -240,27 +267,28 @@ class ZhangCertbotGUI:
 
     def issue_current(self):
         domain = self.current_domain()
-        if domain: self._async(lambda: self._processor().issue([domain], self._settings()), "申请")
+        if domain: self._async(lambda callback: self._processor().issue([domain], self._settings(), callback), "申请")
 
     def renew_current(self):
         domain = self.current_domain()
-        if domain: self._async(lambda: self._processor().renew([domain], self._settings()), "续期")
+        if domain: self._async(lambda callback: self._processor().renew([domain], self._settings(), callback=callback), "续期")
 
     def deploy_current(self):
         domain = self.current_domain()
-        if domain: self._async(lambda: self._processor().deploy([domain], self._settings()), "上传")
+        if domain: self._async(lambda callback: self._processor().deploy([domain], self._settings(), callback), "上传")
 
     def server_domains(self):
         return [x for x in self.manager.list_domains() if x.deploy and x.server_file == self.selected_server_file]
 
-    def renew_server(self): self._async(lambda: self._processor().renew(self.server_domains(), self._settings()), "服务器批量续期")
-    def deploy_server(self): self._async(lambda: self._processor().deploy(self.server_domains(), self._settings()), "服务器批量上传")
-    def renew_all(self): self._async(lambda: self._processor().renew(self.manager.list_domains(), self._settings()), "全部批量续期")
+    def renew_server(self): self._async(lambda callback: self._processor().renew(self.server_domains(), self._settings(), callback=callback), "服务器批量续期")
+    def deploy_server(self): self._async(lambda callback: self._processor().deploy(self.server_domains(), self._settings(), callback), "服务器批量上传")
+    def renew_all(self): self._async(lambda callback: self._processor().renew(self.manager.list_domains(), self._settings(), callback=callback), "全部批量续期")
 
     def log(self, text):
-        if not hasattr(self, "output"):
-            self.output = tk.Text(self.window, height=5, state="disabled")
-        self.output.configure(state="normal"); self.output.insert("end", text + "\n"); self.output.see("end"); self.output.configure(state="disabled")
+        self.output.configure(state="normal")
+        self.output.insert("end", text + "\n")
+        self.output.see("end")
+        self.output.configure(state="disabled")
 
     def run(self): self.window.mainloop()
 
