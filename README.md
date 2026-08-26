@@ -153,7 +153,21 @@ GUI 左侧树状列表按以下层级展示：
 
 不绑定服务器的域名进入“孤立域名（不部署）”列表，只执行本地 Certbot 申请、续期和导出，不执行 SSH 上传或 Nginx reload。
 
-SOCKS5 代理启用后，ZhangCertbot 会在启动 Certbot 前检查代理地址和端口是否可连接。如果代理端口未监听，会直接在实时日志中显示明确错误，例如：
+如果实时日志出现：
+
+```text
+Using SOCKS proxy, but the 'socksio' package is not installed
+```
+
+请在运行 ZhangCertbot 的同一个 Python 环境执行：
+
+```powershell
+python -m pip install "httpx[socks]"
+```
+
+项目的 `requirements.txt` 已包含 `httpx[socks]`。安装完成后重启 GUI。
+
+如果代理端口未监听，会直接在实时日志中显示明确错误，例如：
 
 ```text
 SOCKS5 代理无法连接：127.0.0.1:7890：[WinError 10061] 由于目标计算机积极拒绝

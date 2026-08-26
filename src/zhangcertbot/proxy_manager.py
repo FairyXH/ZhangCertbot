@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import configparser
+import importlib.util
 import os
 import socket
 from dataclasses import dataclass
@@ -20,6 +21,8 @@ class ProxyConfig:
     def check(self, timeout: float = 1.5) -> tuple[bool, str]:
         if not self.enabled:
             return True, "代理未启用"
+        if importlib.util.find_spec("socksio") is None:
+            return False, "SOCKS5 代理需要 socksio，请执行：python -m pip install \"httpx[socks]\""
         try:
             with socket.create_connection((self.host, self.port), timeout=timeout):
                 return True, f"SOCKS5 代理可连接：{self.host}:{self.port}"

@@ -12,12 +12,21 @@ def test_proxy_config_builds_socks5h_environment():
     assert environment["NO_PROXY"] == "127.0.0.1,localhost"
 
 
+def test_proxy_check_reports_missing_socksio(monkeypatch):
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: None if name == "socksio" else object())
+    ok, message = ProxyConfig(True, "127.0.0.1", 7898).check()
+    assert ok is False
+    assert "socksio" in message
+    assert "httpx[socks]" in message
+
+
 def test_proxy_check_reports_refused_port(monkeypatch):
-    from src.zhangcertbot.proxy_manager import ProxyConfig
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
     monkeypatch.setattr("socket.create_connection", lambda *args, **kwargs: (_ for _ in ()).throw(ConnectionRefusedError(10061, "refused")))
     ok, message = ProxyConfig(True, "127.0.0.1", 7890).check()
     assert ok is False
     assert "无法连接" in message
+
 
 def test_disabled_proxy_removes_proxy_environment():
     config = ProxyConfig(enabled=False, host="127.0.0.1", port=7891)
