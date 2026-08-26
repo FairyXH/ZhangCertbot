@@ -71,10 +71,22 @@ class DomainConfig:
     deploy: bool
     server_file: str
     certbot_extra: list[str] = field(default_factory=list)
+    bindings: dict[str, "DeploymentBinding"] = field(default_factory=dict)
 
     @property
     def base_name(self) -> str:
         return self.name.removeprefix("*.")
+
+    def binding_for(self, server_file: str) -> "DeploymentBinding":
+        return self.bindings.get(server_file, DeploymentBinding())
+
+
+@dataclass
+class DeploymentBinding:
+    certificate_path: str = ""
+    private_key_path: str = ""
+    reload_nginx: bool = True
+    reload_command: str = "systemctl reload nginx"
 
 
 class ConfigManager:
@@ -127,7 +139,11 @@ class ConfigManager:
                             cloudflare.get("api_token", ""), cloudflare.get("zone", ""),
                             resolve_path(certificate.get("output_dir", f"data/certificates/{names[0]}"), self.root),
                             server.getboolean("deploy", False), server.get("server", ""),
-                            split_csv(certificate.get("certbot_extra", "")))
+                            split_csv(certificate.get("certbot_extra", "")),
+                            {section_name.removeprefix("deploy:"): DeploymentBinding(
+                                parser[section_name].get("certificate_path", ""), parser[section_name].get("private_key_path", ""),
+                                parser[section_name].getboolean("reload_nginx", True), parser[section_name].get("reload_command", "systemctl reload nginx"))
+                             for section_name in parser.sections() if section_name.startswith("deploy:")})
 
     @staticmethod
     def _read(path: Path) -> configparser.ConfigParser:
@@ -177,6 +193,8 @@ class ConfigManager:
                 for key, comment in comments.items():
                     handle.write(f"# {comment}\n{key} = {values.get(section, {}).get(key, '')}\n")
                 handle.write("\n")
+            for server_file, binding in values.get("deploy_bindings", {}).items():
+                handle.write(f"[deploy:{server_file}]\n# 远程 fullchain.pem 路径\ncertificate_path = {binding.get('certificate_path', '')}\n# 远程 privkey.pem 路径\nprivate_key_path = {binding.get('private_key_path', '')}\n# 是否 reload Nginx\nreload_nginx = {binding.get('reload_nginx', 'true')}\n# reload 命令\nreload_command = {binding.get('reload_command', 'systemctl reload nginx')}\n\n")
         try:
             path.chmod(stat.S_IRUSR | stat.S_IWUSR)
         except OSError:

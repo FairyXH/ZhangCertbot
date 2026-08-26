@@ -4,123 +4,245 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 from pathlib import Path
 
+from .batch_manager import BatchItemResult, BatchProcessor, BatchSettings
 from .certbot_runner import CertbotRunner
-from .cli import ROOT
-from .config_manager import ConfigManager, mask_secret, validate_domains
+from .config_manager import ConfigManager, DeploymentBinding, DomainConfig, ServerConfig, mask_secret, validate_domains
+from .deploy_manager import DeployManager
 
 
 class ZhangCertbotGUI:
-    def __init__(self, root: Path = ROOT):
-        self.root = root
-        self.manager = ConfigManager(root)
+    """Tkinter GUI with a server -> domain tree and per-domain deployment settings."""
+
+    def __init__(self, root: Path):
+        self.root = root.resolve()
+        self.manager = ConfigManager(self.root)
         self.manager.ensure_dirs()
         self.window = tk.Tk()
-        self.window.title("ZhangCertbot")
-        self.window.geometry("760x560")
-        self.window.minsize(680, 480)
+        self.window.title("ZhangCertbot - Certbot 证书管理")
+        self.window.geometry("1180x760")
+        self.window.minsize(980, 620)
+        self.selected_domain: DomainConfig | None = None
+        self.selected_server: ServerConfig | None = None
         self._build()
+        self.refresh()
 
     def _build(self):
-        self.notebook = ttk.Notebook(self.window)
-        self.notebook.pack(fill="both", expand=True, padx=12, pady=12)
-        self.server_tab = ttk.Frame(self.notebook, padding=12)
-        self.domain_tab = ttk.Frame(self.notebook, padding=12)
-        self.notebook.add(self.server_tab, text="服务器")
-        self.notebook.add(self.domain_tab, text="域名")
-        self._build_server_tab()
-        self._build_domain_tab()
-        action = ttk.Frame(self.window, padding=(12, 0, 12, 12))
-        action.pack(fill="x")
-        ttk.Button(action, text="申请证书", command=self.issue).pack(side="left", padx=4)
-        ttk.Button(action, text="检查证书", command=self.check).pack(side="left", padx=4)
-        ttk.Button(action, text="续期证书", command=self.renew).pack(side="left", padx=4)
-        ttk.Button(action, text="刷新", command=self.refresh).pack(side="left", padx=4)
-        ttk.Button(action, text="退出", command=self.window.destroy).pack(side="right", padx=4)
-        self.output = tk.Text(self.window, height=8, state="disabled", wrap="word")
-        self.output.pack(fill="both", padx=12, pady=(0, 12))
+        self.window.columnconfigure(0, weight=1)
+        self.window.rowconfigure(1, weight=1)
+        toolbar = ttk.Frame(self.window, padding=10)
+        toolbar.grid(row=0, column=0, sticky="ew")
+        ttk.Button(toolbar, text="添加服务器", command=self.add_server).pack(side="left", padx=3)
+        ttk.Button(toolbar, text="添加域名", command=self.add_domain).pack(side="left", padx=3)
+        ttk.Button(toolbar, text="刷新列表", command=self.refresh).pack(side="left", padx=3)
+        ttk.Label(toolbar, text="批量并发：").pack(side="left", padx=(22, 3))
+        self.parallel = tk.BooleanVar(value=False)
+        ttk.Checkbutton(toolbar, text="启用", variable=self.parallel).pack(side="left")
+        ttk.Label(toolbar, text="最大线程数").pack(side="left", padx=(8, 3))
+        self.workers = tk.IntVar(value=4)
+        ttk.Spinbox(toolbar, from_=1, to=32, width=5, textvariable=self.workers).pack(side="left")
+        ttk.Button(toolbar, text="批量续期全部", command=self.batch_renew_all).pack(side="right", padx=3)
 
-    def _entry(self, parent, row, label, show=None):
-        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=(0, 8), pady=5)
-        entry = ttk.Entry(parent, width=58, show=show)
-        entry.grid(row=row, column=1, sticky="ew", pady=5)
-        parent.columnconfigure(1, weight=1)
-        return entry
+        pane = ttk.PanedWindow(self.window, orient="horizontal")
+        pane.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
+        left = ttk.Frame(pane, padding=6)
+        right = ttk.Frame(pane, padding=12)
+        pane.add(left, weight=1)
+        pane.add(right, weight=3)
+        left.rowconfigure(0, weight=1)
+        left.columnconfigure(0, weight=1)
+        self.tree = ttk.Treeview(left, show="tree", selectmode="browse")
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        scroll = ttk.Scrollbar(left, orient="vertical", command=self.tree.yview)
+        scroll.grid(row=0, column=1, sticky="ns")
+        self.tree.configure(yscrollcommand=scroll.set)
+        self.tree.bind("<<TreeviewSelect>>", self.on_select)
 
-    def _build_server_tab(self):
-        self.server_name = self._entry(self.server_tab, 0, "服务器名称")
-        self.server_host = self._entry(self.server_tab, 1, "SSH 地址")
-        self.server_port = self._entry(self.server_tab, 2, "SSH 端口")
-        self.server_port.insert(0, "22")
-        self.server_user = self._entry(self.server_tab, 3, "SSH 用户名")
-        self.server_key = self._entry(self.server_tab, 4, "SSH 私钥路径")
-        self.remote_fullchain = self._entry(self.server_tab, 5, "远程 fullchain.pem")
-        self.remote_privkey = self._entry(self.server_tab, 6, "远程 privkey.pem")
-        self.server_reload = tk.BooleanVar(value=True)
-        ttk.Checkbutton(self.server_tab, text="上传后 reload Nginx", variable=self.server_reload).grid(row=7, column=1, sticky="w")
-        ttk.Button(self.server_tab, text="保存服务器", command=self.save_server).grid(row=8, column=1, sticky="e", pady=10)
+        right.columnconfigure(1, weight=1)
+        right.rowconfigure(13, weight=1)
+        self.detail_title = ttk.Label(right, text="请选择服务器或域名", font=("Microsoft YaHei UI", 16, "bold"))
+        self.detail_title.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 12))
+        self.fields: dict[str, tk.Entry] = {}
+        self._field(right, 1, "域名", "name")
+        self._field(right, 2, "申请域名列表", "domains")
+        self._field(right, 3, "邮箱", "email")
+        self._field(right, 4, "Cloudflare API Token", "api_token")
+        self._field(right, 5, "Let's Encrypt 环境", "environment")
+        self._field(right, 6, "Certbot cert-name", "cert_name")
+        self._field(right, 7, "Cloudflare Zone", "zone")
+        self._field(right, 8, "本地导出目录", "output_dir")
+        self._field(right, 9, "绑定服务器配置", "server_file")
+        self._field(right, 10, "远程 fullchain.pem", "certificate_path")
+        self._field(right, 11, "远程 privkey.pem", "private_key_path")
+        self._field(right, 12, "Nginx reload 命令", "reload_command")
+        self.wildcard = tk.BooleanVar(value=False)
+        self.deploy = tk.BooleanVar(value=False)
+        self.reload_nginx = tk.BooleanVar(value=True)
+        ttk.Checkbutton(right, text="泛域名", variable=self.wildcard).grid(row=13, column=1, sticky="w", pady=3)
+        ttk.Checkbutton(right, text="部署到服务器", variable=self.deploy).grid(row=14, column=1, sticky="w", pady=3)
+        ttk.Checkbutton(right, text="nginx -t 成功后 reload", variable=self.reload_nginx).grid(row=15, column=1, sticky="nw", pady=3)
+        buttons = ttk.Frame(right)
+        buttons.grid(row=16, column=0, columnspan=2, sticky="ew", pady=(14, 6))
+        for text, command in (("保存当前域名", self.save_domain), ("申请当前", self.issue_selected), ("续期当前", self.renew_selected), ("上传当前", self.deploy_selected), ("批量申请当前服务器", self.batch_issue_server), ("批量续期当前服务器", self.batch_renew_server), ("批量上传当前服务器", self.batch_deploy_server), ("批量申请孤立域名", self.batch_issue_orphans), ("批量续期孤立域名", self.batch_renew_orphans), ("批量上传孤立域名", self.batch_deploy_orphans)):
+            ttk.Button(buttons, text=text, command=command).pack(side="left", padx=2)
+        self.output = tk.Text(right, height=9, state="disabled", wrap="word")
+        self.output.grid(row=17, column=0, columnspan=2, sticky="nsew", pady=(8, 0))
 
-    def _build_domain_tab(self):
-        self.domain_name = self._entry(self.domain_tab, 0, "域名")
-        self.domain_wildcard = tk.BooleanVar(value=True)
-        ttk.Checkbutton(self.domain_tab, text="申请泛域名（自动包含基础域名）", variable=self.domain_wildcard).grid(row=1, column=1, sticky="w", pady=5)
-        self.domain_email = self._entry(self.domain_tab, 2, "邮箱")
-        self.domain_token = self._entry(self.domain_tab, 3, "Cloudflare API Token", show="*")
-        self.domain_environment = ttk.Combobox(self.domain_tab, values=("production", "staging"), state="readonly")
-        self.domain_environment.set("production")
-        ttk.Label(self.domain_tab, text="Let's Encrypt 环境").grid(row=4, column=0, sticky="w", padx=(0, 8), pady=5)
-        self.domain_environment.grid(row=4, column=1, sticky="w", pady=5)
-        self.domain_server = self._entry(self.domain_tab, 5, "服务器配置文件（可空）")
-        ttk.Button(self.domain_tab, text="保存域名", command=self.save_domain).grid(row=6, column=1, sticky="e", pady=10)
+    def _field(self, parent, row, label, key):
+        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=(0, 10), pady=3)
+        entry = ttk.Entry(parent, show="*" if key == "api_token" else None)
+        entry.grid(row=row, column=1, sticky="ew", pady=3)
+        self.fields[key] = entry
 
-    def save_server(self):
-        try:
-            values = {"server": {"name": self.server_name.get().strip(), "host": self.server_host.get().strip(), "port": self.server_port.get().strip(), "username": self.server_user.get().strip()}, "ssh": {"enabled": "true", "private_key": self.server_key.get().strip()}, "deploy": {"certificate_path": self.remote_fullchain.get().strip(), "private_key_path": self.remote_privkey.get().strip(), "reload_nginx": str(self.server_reload.get()).lower(), "reload_command": "systemctl reload nginx"}, "certificates": {"domains": ""}}
-            path = self.manager.write_server(values)
-            self.log(f"服务器配置已保存：{path.name}")
-        except Exception as exc:
-            messagebox.showerror("保存失败", str(exc))
+    def _set_field(self, key, value):
+        entry = self.fields[key]
+        entry.delete(0, "end")
+        entry.insert(0, value or "")
+
+    def _clear_details(self):
+        for key in self.fields: self._set_field(key, "")
+        self.wildcard.set(False); self.deploy.set(False); self.reload_nginx.set(True)
+
+    def refresh(self):
+        self.tree.delete(*self.tree.get_children())
+        self._clear_details()
+        self.selected_domain = None
+        self.selected_server = None
+        domains = self.manager.list_domains()
+        servers = self.manager.list_servers()
+        assigned: set[str] = set()
+        for server in servers:
+            sid = self.tree.insert("", "end", text=f"服务器：{server.name}", values=("server", server.file.name))
+            for domain in domains:
+                if domain.server_file == server.file.name and domain.deploy:
+                    assigned.add(domain.file.name)
+                    self.tree.insert(sid, "end", text=domain.name, values=("domain", domain.file.name))
+        orphan = self.tree.insert("", "end", text="孤立域名（不部署）", values=("orphan", ""))
+        for domain in domains:
+            if not domain.deploy or domain.file.name not in assigned:
+                self.tree.insert(orphan, "end", text=domain.name, values=("domain", domain.file.name))
+        self.tree.item(orphan, open=True)
+
+    def on_select(self, _event=None):
+        selection = self.tree.selection()
+        if not selection: return
+        item = self.tree.item(selection[0])
+        kind, filename = item.get("values", ["", ""])
+        if kind == "server":
+            self.selected_server = next((x for x in self.manager.list_servers() if x.file.name == filename), None)
+            self.selected_domain = None
+            self.detail_title.configure(text=f"服务器：{self.selected_server.name if self.selected_server else filename}")
+            return
+        if kind == "domain":
+            self.selected_domain = next((x for x in self.manager.list_domains() if x.file.name == filename), None)
+            self.selected_server = None
+            self.load_domain(self.selected_domain)
+
+    def load_domain(self, domain: DomainConfig | None):
+        if domain is None: return
+        self.detail_title.configure(text=f"域名：{domain.name}")
+        self._set_field("name", domain.name)
+        self._set_field("domains", ", ".join(domain.domains))
+        self._set_field("email", domain.email)
+        self._set_field("api_token", domain.api_token)
+        self._set_field("environment", domain.environment)
+        self._set_field("cert_name", domain.cert_name)
+        self._set_field("zone", domain.zone)
+        self._set_field("output_dir", str(domain.output_dir))
+        self._set_field("server_file", domain.server_file)
+        binding = domain.binding_for(domain.server_file)
+        self._set_field("certificate_path", binding.certificate_path)
+        self._set_field("private_key_path", binding.private_key_path)
+        self._set_field("reload_command", binding.reload_command)
+        self.wildcard.set(domain.wildcard); self.deploy.set(domain.deploy); self.reload_nginx.set(binding.reload_nginx)
 
     def save_domain(self):
         try:
-            name = self.domain_name.get().strip().lower()
-            names = validate_domains([name, f"*.{name}"] if self.domain_wildcard.get() else [name])
-            values = {"name": name, "domain": {"name": name, "wildcard": str(self.domain_wildcard.get()).lower(), "domains": ", ".join(names)}, "letsencrypt": {"environment": self.domain_environment.get(), "email": self.domain_email.get().strip(), "cert_name": name}, "cloudflare": {"api_token": self.domain_token.get().strip(), "zone": name}, "certificate": {"output_dir": f"data/certificates/{name}", "certbot_extra": ""}, "server": {"deploy": str(bool(self.domain_server.get().strip())).lower(), "server": self.domain_server.get().strip()}}
+            name = self.fields["name"].get().strip().lower()
+            names = validate_domains([x.strip() for x in self.fields["domains"].get().split(",") if x.strip()])
+            server_file = self.fields["server_file"].get().strip()
+            values = {"name": name, "domain": {"name": name, "wildcard": str(self.wildcard.get()).lower(), "domains": ", ".join(names)}, "letsencrypt": {"environment": self.fields["environment"].get().strip().lower() or "production", "email": self.fields["email"].get().strip(), "cert_name": self.fields["cert_name"].get().strip() or name}, "cloudflare": {"api_token": self.fields["api_token"].get().strip(), "zone": self.fields["zone"].get().strip()}, "certificate": {"output_dir": self.fields["output_dir"].get().strip() or f"data/certificates/{name}", "certbot_extra": ""}, "server": {"deploy": str(self.deploy.get()).lower(), "server": server_file}, "deploy_bindings": {server_file: {"certificate_path": self.fields["certificate_path"].get().strip(), "private_key_path": self.fields["private_key_path"].get().strip(), "reload_nginx": str(self.reload_nginx.get()).lower(), "reload_command": self.fields["reload_command"].get().strip() or "systemctl reload nginx"}} if server_file else {}}
             path = self.manager.write_domain(values)
-            self.log(f"域名配置已保存：{path.name}，Token：{mask_secret(self.domain_token.get())}")
-        except Exception as exc:
-            messagebox.showerror("保存失败", str(exc))
+            self.log(f"已保存域名配置：{path.name}")
+            self.refresh()
+        except Exception as exc: messagebox.showerror("保存失败", str(exc))
 
-    def issue(self):
-        self.log("开始调用 Certbot 申请证书……")
-        for domain in self.manager.list_domains():
-            result = CertbotRunner(self.root).issue(domain)
-            self.log(f"{domain.name}：{'成功' if result.ok else '失败'}")
-            if not result.ok: self.log(result.stderr.strip())
+    def add_server(self):
+        self._server_dialog()
 
-    def check(self):
-        result = CertbotRunner(self.root).certificates()
-        self.log(result.stdout.strip() or result.stderr.strip())
+    def _server_dialog(self):
+        dialog = tk.Toplevel(self.window); dialog.title("添加服务器"); dialog.transient(self.window); dialog.grab_set()
+        entries = {}
+        for row, label, default in ((0, "服务器名称", ""), (1, "SSH 地址", ""), (2, "SSH 端口", "22"), (3, "SSH 用户名", "root"), (4, "SSH 私钥路径", ""), (5, "fullchain 默认路径", ""), (6, "privkey 默认路径", "")):
+            ttk.Label(dialog, text=label).grid(row=row, column=0, sticky="w", padx=10, pady=5); entry = ttk.Entry(dialog, width=55); entry.grid(row=row, column=1, padx=10, pady=5); entry.insert(0, default); entries[label] = entry
+        def save():
+            values = {"server": {"name": entries["服务器名称"].get().strip(), "host": entries["SSH 地址"].get().strip(), "port": entries["SSH 端口"].get().strip() or "22", "username": entries["SSH 用户名"].get().strip()}, "ssh": {"enabled": "true", "private_key": entries["SSH 私钥路径"].get().strip()}, "deploy": {"certificate_path": entries["fullchain 默认路径"].get().strip(), "private_key_path": entries["privkey 默认路径"].get().strip(), "reload_nginx": "true", "reload_command": "systemctl reload nginx"}, "certificates": {"domains": ""}}
+            try: self.manager.write_server(values); dialog.destroy(); self.refresh(); self.log("服务器已保存")
+            except Exception as exc: messagebox.showerror("保存失败", str(exc), parent=dialog)
+        ttk.Button(dialog, text="保存", command=save).grid(row=7, column=1, sticky="e", padx=10, pady=10)
 
-    def renew(self):
-        result = CertbotRunner(self.root).renew()
-        self.log(result.stdout.strip() or result.stderr.strip())
+    def add_domain(self):
+        self._clear_details(); self.selected_domain = None; self.detail_title.configure(text="新建域名")
 
-    def refresh(self):
-        self.log(f"服务器：{len(self.manager.list_servers())} 台，域名：{len(self.manager.list_domains())} 个")
+    def _settings(self): return BatchSettings(self.parallel.get(), max(1, int(self.workers.get())))
+    def _processor(self): return BatchProcessor(self.manager)
+    def _run_async(self, operation, label):
+        import threading
+        def work():
+            try:
+                results = operation()
+                self.window.after(0, lambda: [self.log(f"{label}：{x.domain} - {x.message}{'，已部署' if x.deployed else ''}") for x in results])
+            except Exception as exc: self.window.after(0, lambda: self.log(f"{label}失败：{exc}"))
+        threading.Thread(target=work, daemon=True).start()
+
+    def issue_selected(self):
+        if self.selected_domain: self._run_async(lambda: self._processor().issue([self.selected_domain], self._settings()), "申请")
+
+    def renew_selected(self):
+        if self.selected_domain:
+            self._run_async(lambda: self._processor().renew([self.selected_domain], self._settings()), "续期")
+
+    def deploy_selected(self):
+        if self.selected_domain:
+            try: self._processor().deployer.deploy(self.selected_domain); self.log(f"上传成功：{self.selected_domain.name}")
+            except Exception as exc: messagebox.showerror("上传失败", str(exc))
+
+    def batch_issue_server(self):
+        if self.selected_server:
+            domains = [x for x in self.manager.list_domains() if x.server_file == self.selected_server.file.name]
+            self._run_async(lambda: self._processor().issue(domains, self._settings()), "服务器批量申请")
+
+    def batch_renew_server(self):
+        if self.selected_server:
+            domains = [x for x in self.manager.list_domains() if x.server_file == self.selected_server.file.name]
+            self._run_async(lambda: self._processor().renew(domains, self._settings()), "服务器批量续期")
+
+    def batch_deploy_server(self):
+        if self.selected_server:
+            domains = [x for x in self.manager.list_domains() if x.server_file == self.selected_server.file.name]
+            self._run_async(lambda: self._processor().deploy(domains, self._settings()), "服务器批量上传")
+
+    def batch_issue_orphans(self):
+        domains = [x for x in self.manager.list_domains() if not x.deploy]
+        self._run_async(lambda: self._processor().issue(domains, self._settings()), "孤立域名批量申请")
+
+    def batch_deploy_orphans(self):
+        self.log("孤立域名不执行 SSH 上传")
+
+    def batch_renew_orphans(self):
+        domains = [x for x in self.manager.list_domains() if not x.deploy]
+        self._run_async(lambda: self._processor().renew(domains, self._settings()), "孤立域名批量续期")
+
+    def batch_renew_all(self):
+        self._run_async(lambda: self._processor().renew(self.manager.list_domains(), self._settings()), "全部批量续期")
 
     def log(self, text):
-        self.output.configure(state="normal")
-        self.output.insert("end", text + "\n")
-        self.output.see("end")
-        self.output.configure(state="disabled")
+        self.output.configure(state="normal"); self.output.insert("end", text + "\n"); self.output.see("end"); self.output.configure(state="disabled")
 
-    def run(self):
-        self.window.mainloop()
+    def run(self): self.window.mainloop()
 
 
 def main():
-    ZhangCertbotGUI().run()
+    ZhangCertbotGUI(Path(__file__).resolve().parents[2]).run()
 
 
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__": main()

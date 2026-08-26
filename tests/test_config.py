@@ -32,20 +32,17 @@ def test_write_server_accepts_nested_server_name(tmp_path: Path):
     assert "Zhang服务器" in path.read_text(encoding="utf-8")
 
 
-def test_load_multiple_servers_and_domains(tmp_path: Path):
+def test_domain_has_independent_server_binding_paths(tmp_path: Path):
     manager = ConfigManager(tmp_path)
     manager.ensure_dirs()
-    (manager.servers_dir / "server1-config.ini").write_text(
-        """[server]\nname = server1\nhost = 192.0.2.1\nport = 22\nusername = root\n\n[ssh]\nenabled = true\nprivate_key = ~/.ssh/id_ed25519\n\n[deploy]\ncertificate_path = /etc/nginx/fullchain.pem\nprivate_key_path = /etc/nginx/privkey.pem\nreload_nginx = true\nreload_command = systemctl reload nginx\n\n[certificates]\ndomains = example.com.ini\n""", encoding="utf-8")
-    (manager.domains_dir / "example.ini").write_text(
-        """[domain]\nname = example.com\nwildcard = true\ndomains = example.com, *.example.com\n[letsencrypt]\nenvironment = staging\nemail = admin@example.com\ncert_name = example.com\n[cloudflare]\napi_token = secret-token\nzone = example.com\n[certificate]\noutput_dir = data/certificates/example.com\n[server]\ndeploy = true\nserver = server1-config.ini\n""", encoding="utf-8")
-    server = manager.list_servers()[0]
+    path = manager.domains_dir / "example.ini"
+    path.write_text(
+        """[domain]\nname = example.com\ndomains = example.com\n[letsencrypt]\nenvironment = production\nemail = a@b.com\ncert_name = example.com\n[cloudflare]\napi_token = secret-token\nzone = example.com\n[certificate]\noutput_dir = data/certificates/example.com\n[server]\ndeploy = true\nserver = server1-config.ini\n[deploy:server1-config.ini]\ncertificate_path = /nginx/example/fullchain.pem\nprivate_key_path = /nginx/example/privkey.pem\nreload_nginx = false\nreload_command = systemctl reload nginx\n""", encoding="utf-8")
     domain = manager.list_domains()[0]
-    assert server.host == "192.0.2.1"
-    assert server.ssh_enabled is True
-    assert domain.environment == "staging"
-    assert domain.domains == ["example.com", "*.example.com"]
-    assert domain.output_dir == tmp_path / "data/certificates/example.com"
+    binding = domain.binding_for("server1-config.ini")
+    assert binding.certificate_path == "/nginx/example/fullchain.pem"
+    assert binding.private_key_path == "/nginx/example/privkey.pem"
+    assert binding.reload_nginx is False
 
 
 def test_credentials_are_written_separately_and_token_is_masked(tmp_path: Path):

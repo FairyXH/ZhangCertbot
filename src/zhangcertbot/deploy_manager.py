@@ -22,5 +22,5 @@ class DeployManager:
             raise ValueError(f"服务器未启用 SSH 上传：{server.name}")
         fullchain = domain.output_dir / "fullchain.pem"
         private_key = domain.output_dir / "privkey.pem"
-        self.ssh.deploy(server, fullchain, private_key)
+        self.ssh.deploy(server, fullchain, private_key, domain.binding_for(domain.server_file))
         return server.name

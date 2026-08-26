@@ -82,7 +82,49 @@ data/
 └── runtime/cloudflare/      # Certbot credentials，不提交 Git
 ```
 
-## 添加服务器
+## 服务器二级域名列表
+
+GUI 左侧树状列表按以下层级展示：
+
+```text
+服务器：Zhang服务器
+├── domain-a.example.com
+└── domain-b.example.com
+
+孤立域名（不部署）
+├── local-a.example.com
+└── local-b.example.com
+```
+
+点击服务器节点会选中该服务器；点击其下域名会加载该域名的完整配置。每个域名的部署段独立保存：
+
+- 远程 `fullchain.pem` 路径
+- 远程 `privkey.pem` 路径
+- Nginx reload 开关
+- Nginx reload 命令
+
+因此同一台服务器下的多个域名可以使用完全不同的远程证书目录。
+
+不绑定服务器的域名进入“孤立域名（不部署）”列表，只执行本地 Certbot 申请、续期和导出，不执行 SSH 上传或 Nginx reload。
+
+## 批量处理与多线程
+
+GUI 顶部可以控制：
+
+- 是否启用并发
+- 最大线程数，范围 1-32
+
+批量操作支持：
+
+- 当前服务器批量申请
+- 当前服务器批量续期
+- 当前服务器批量上传
+- 孤立域名批量申请
+- 孤立域名批量续期
+- 全部域名批量续期
+
+Certbot 的批量 `renew` 命令本身只调用一次；证书导出和每个域名的 SSH 上传可以并发执行。关闭并发时使用单线程顺序处理。
+
 
 执行 `python main.py add-server`，填写 SSH 地址、端口、用户名、私钥路径、远程 `fullchain.pem` 和 `privkey.pem` 路径。默认使用 SSH 私钥认证，不保存 SSH 密码。
 

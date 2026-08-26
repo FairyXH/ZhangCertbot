@@ -63,8 +63,10 @@ class CertbotRunner:
         args.extend(domain.certbot_extra)
         return self.run(args)
 
-    def renew(self, dry_run: bool = False, force: bool = False) -> CertbotResult:
+    def renew(self, dry_run: bool = False, force: bool = False, cert_name: str = "") -> CertbotResult:
         args = ["renew", *self._common()]
+        if cert_name:
+            args.extend(["--cert-name", cert_name])
         if dry_run:
             args.append("--dry-run")
         if force:
