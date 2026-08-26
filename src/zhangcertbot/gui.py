@@ -6,6 +6,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from .batch_manager import BatchProcessor, BatchSettings
+from .certbot_runner import CertbotRunner
 from .certificate_manager import CertificateManager, certificate_files
 from .config_manager import ConfigManager, mask_secret, validate_domains
 from .proxy_manager import ProxyConfig, ProxyManager
