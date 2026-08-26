@@ -17,7 +17,7 @@ from .certbot_runner import CertbotRunner
 from .certificate_manager import CertificateManager, certificate_files
 from .config_manager import ConfigManager, mask_secret, validate_domains
 from .proxy_manager import ProxyConfig, ProxyManager
-from .ssh_manager import SSHManager
+from .ssh_manager import SSHManager, strip_ansi
 
 
 class ZhangCertbotGUI:
@@ -482,7 +482,7 @@ class ZhangCertbotGUI:
                 while dialog.winfo_exists():
                     try:
                         data = channel.recv(4096)
-                        if data: self.window.after(0, append, data.decode(errors="replace"))
+                        if data: self.window.after(0, append, strip_ansi(data.decode(errors="replace")))
                     except (socket.timeout, TimeoutError): continue
                     except Exception as exc: self.window.after(0, append, f"\nSSH 会话结束：{exc}\n"); break
             except Exception as exc: self.window.after(0, append, f"连接失败：{exc}\n")

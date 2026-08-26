@@ -124,7 +124,8 @@ class BatchProcessor:
                 self.deployer.deploy(domain)
                 return BatchItemResult(domain.name, True, "上传成功", True)
             except Exception as exc:
-                return BatchItemResult(domain.name, False, str(exc))
+                message = f"{type(exc).__name__}: {exc}"
+                return BatchItemResult(domain.name, False, message)
 
         return self._map(list(domains), settings, one, callback)
 

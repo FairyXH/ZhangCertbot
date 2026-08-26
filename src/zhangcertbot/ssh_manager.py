@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import posixpath
+import re
 import time
 from pathlib import Path
 
@@ -11,6 +12,13 @@ except ImportError:  # pragma: no cover - handled by runtime error
     paramiko = None
 
 from .config_manager import DeploymentBinding, ServerConfig
+
+
+ANSI_ESCAPE_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+
+
+def strip_ansi(text: str) -> str:
+    return ANSI_ESCAPE_RE.sub("", text)
 
 
 class SSHManager:
@@ -104,8 +112,20 @@ class SSHManager:
 
     @staticmethod
     def _upload_atomic(sftp, local: Path, remote: str) -> None:
+        if not local.is_file():
+            raise FileNotFoundError(f"本地证书文件不存在：{local}")
         temporary = f"{remote}.zhangcertbot-{os.getpid()}.tmp"
-        sftp.put(str(local), temporary)
-        if sftp.stat(temporary).st_size != local.stat().st_size:
-            raise RuntimeError(f"SFTP 上传校验失败：{remote}")
-        sftp.rename(temporary, remote)
+        try:
+            sftp.put(str(local), temporary)
+        except Exception as exc:
+            raise RuntimeError(f"上传临时文件失败：{local.name} -> {remote}：{type(exc).__name__}: {exc}") from exc
+        try:
+            remote_size = sftp.stat(temporary).st_size
+        except Exception as exc:
+            raise RuntimeError(f"读取远程临时文件失败：{temporary}：{type(exc).__name__}: {exc}") from exc
+        if remote_size != local.stat().st_size:
+            raise RuntimeError(f"SFTP 上传校验失败：{remote}（本地 {local.stat().st_size} 字节，远程 {remote_size} 字节）")
+        try:
+            sftp.rename(temporary, remote)
+        except Exception as exc:
+            raise RuntimeError(f"替换远程证书文件失败：{remote}。请确认目标目录存在且用户有写权限：{type(exc).__name__}: {exc}") from exc
