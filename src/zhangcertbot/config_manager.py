@@ -170,6 +170,12 @@ class ConfigManager:
             pass
         return path
 
+    def delete_server(self, path: Path) -> None:
+        path.unlink(missing_ok=True)
+
+    def delete_domain(self, path: Path) -> None:
+        path.unlink(missing_ok=True)
+
     def write_server(self, values: dict) -> Path:
         self.ensure_dirs()
         path = self.servers_dir / f"{values['server']['name']}-config.ini"

@@ -58,6 +58,7 @@ class ZhangCertbotGUI:
         self.server_list.bind("<<ListboxSelect>>", self.on_server_select)
         ttk.Button(left, text="批量续期选中服务器", command=self.renew_server).grid(row=2, column=0, sticky="ew", pady=2)
         ttk.Button(left, text="批量上传选中服务器", command=self.deploy_server).grid(row=3, column=0, sticky="ew", pady=2)
+        ttk.Button(left, text="删除服务器", command=self.delete_server).grid(row=4, column=0, sticky="ew", pady=2)
 
         right.rowconfigure(1, weight=1)
         right.rowconfigure(3, weight=1)
@@ -76,7 +77,7 @@ class ZhangCertbotGUI:
         self.domain_list.configure(yscrollcommand=domain_scroll.set)
         buttons = ttk.Frame(right)
         buttons.grid(row=2, column=0, sticky="ew", pady=(0, 8))
-        for text, command in (("新建孤立域名", self.new_orphan), ("新建服务器部署域名", self.new_deploy_domain), ("申请当前", self.issue_current), ("续期当前", self.renew_current), ("上传当前", self.deploy_current), ("保存域名", self.save_domain)):
+        for text, command in (("新建孤立域名", self.new_orphan), ("新建服务器部署域名", self.new_deploy_domain), ("申请当前", self.issue_current), ("续期当前", self.renew_current), ("上传当前", self.deploy_current), ("保存域名", self.save_domain), ("删除域名", self.delete_domain)):
             ttk.Button(buttons, text=text, command=command).pack(side="left", padx=2)
         lower = ttk.PanedWindow(right, orient="horizontal")
         lower.grid(row=3, column=0, sticky="nsew", pady=(10, 0))
@@ -98,7 +99,7 @@ class ZhangCertbotGUI:
             label_widget = ttk.Label(self.form, text=label)
             label_widget.grid(row=row, column=0, sticky="w", padx=(0, 8), pady=3)
             self.field_labels[key] = label_widget
-            entry = ttk.Entry(self.form, show="*" if key == "token" else None)
+            entry = ttk.Entry(self.form)
             entry.grid(row=row, column=1, sticky="ew", pady=3)
             self.entries[key] = entry
             if key == "private_key":
@@ -145,6 +146,33 @@ class ZhangCertbotGUI:
         self.auto_upload.set(False)
         self.auto_reload.set(True)
 
+    def delete_server(self):
+        selection = self.server_list.curselection()
+        if not selection:
+            return
+        servers = self.manager.list_servers()
+        server = servers[selection[0]]
+        if not messagebox.askyesno("确认删除", f"确定删除服务器“{server.name}”及其连接配置吗？\n域名配置和证书文件不会删除。"):
+            return
+        self.manager.delete_server(server.file)
+        self.selected_server_file = ""
+        self.selected_domain_file = ""
+        self.log(f"已删除服务器配置：{server.name}")
+        self.show_servers()
+
+    def delete_domain(self):
+        domain = self.current_domain()
+        if domain is None:
+            return
+        if not messagebox.askyesno("确认删除", f"确定删除域名配置“{domain.name}”吗？\n本地证书文件不会删除。"):
+            return
+        self.manager.delete_domain(domain.file)
+        self.selected_domain_file = ""
+        self.log(f"已删除域名配置：{domain.name}")
+        if self.selected_server_file:
+            self.on_server_select()
+        else:
+            self.show_orphans()
     def show_servers(self):
         servers = self.manager.list_servers()
         self.server_list.delete(0, "end")
@@ -157,7 +185,8 @@ class ZhangCertbotGUI:
 
     def on_server_select(self, _event=None):
         selection = self.server_list.curselection()
-        if not selection: return
+        if not selection:
+            return
         servers = self.manager.list_servers()
         server = servers[selection[0]]
         self.selected_server_file = server.file.name
@@ -245,17 +274,18 @@ class ZhangCertbotGUI:
         try:
             raw_name = self.entries["name"].get().strip().lower()
             names = validate_domains([raw_name])
-            name = names[0]
+            name = raw_name
+            base_name = raw_name.removeprefix("*.")
             token = self.entries["token"].get().strip()
             if not token: raise ValueError("Cloudflare Token 不能为空")
             if self.mode.get() == "orphan":
-                values = {"name": name, "domain": {"name": name, "wildcard": str(raw_name.startswith("*.")).lower(), "domains": ", ".join(names)}, "letsencrypt": {"environment": "production", "email": "", "cert_name": name}, "cloudflare": {"api_token": token, "zone": name.removeprefix("*.")}, "certificate": {"output_dir": f"data/certificates/{name.removeprefix('*.')}", "certbot_extra": ""}, "server": {"deploy": "false", "server": ""}}
+                values = {"name": name, "domain": {"name": name, "wildcard": str(raw_name.startswith("*.")).lower(), "domains": ", ".join(names)}, "letsencrypt": {"environment": "production", "email": "", "cert_name": base_name}, "cloudflare": {"api_token": token, "zone": base_name}, "certificate": {"output_dir": f"data/certificates/{base_name}", "certbot_extra": ""}, "server": {"deploy": "false", "server": ""}}
             else:
                 server_name = self.entries["server_name"].get().strip()
                 if not server_name: raise ValueError("服务器名称不能为空")
                 server_values = {"server": {"name": server_name, "host": self.entries["host"].get().strip(), "port": self.entries["port"].get().strip() or "22", "username": "root"}, "ssh": {"enabled": "true", "private_key": self.entries["private_key"].get().strip()}, "deploy": {"certificate_path": self.entries["certificate_path"].get().strip(), "private_key_path": self.entries["private_key_path"].get().strip(), "reload_nginx": str(self.auto_reload.get()).lower(), "reload_command": self.entries["reload_command"].get().strip() or "systemctl reload nginx"}, "certificates": {"domains": ""}}
                 server_path = self.manager.write_server(server_values)
-                values = {"name": name, "domain": {"name": name, "wildcard": str(raw_name.startswith("*.")).lower(), "domains": ", ".join(names)}, "letsencrypt": {"environment": "production", "email": "", "cert_name": name}, "cloudflare": {"api_token": token, "zone": name.removeprefix("*.")}, "certificate": {"output_dir": f"data/certificates/{name.removeprefix('*.')}", "certbot_extra": ""}, "server": {"deploy": str(self.auto_upload.get()).lower(), "server": server_path.name}, "deploy_bindings": {server_path.name: {"certificate_path": self.entries["certificate_path"].get().strip(), "private_key_path": self.entries["private_key_path"].get().strip(), "reload_nginx": str(self.auto_reload.get()).lower(), "reload_command": self.entries["reload_command"].get().strip() or "systemctl reload nginx"}}}
+                values = {"name": name, "domain": {"name": name, "wildcard": str(raw_name.startswith("*.")).lower(), "domains": ", ".join(names)}, "letsencrypt": {"environment": "production", "email": "", "cert_name": base_name}, "cloudflare": {"api_token": token, "zone": base_name}, "certificate": {"output_dir": f"data/certificates/{base_name}", "certbot_extra": ""}, "server": {"deploy": str(self.auto_upload.get()).lower(), "server": server_path.name}, "deploy_bindings": {server_path.name: {"certificate_path": self.entries["certificate_path"].get().strip(), "private_key_path": self.entries["private_key_path"].get().strip(), "reload_nginx": str(self.auto_reload.get()).lower(), "reload_command": self.entries["reload_command"].get().strip() or "systemctl reload nginx"}}}
             path = self.manager.write_domain(values)
             self.log(f"已保存：{path.name}，Token：{mask_secret(token)}")
             self.show_servers() if self.mode.get() == "deploy" else self.show_orphans()
