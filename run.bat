@@ -1,5 +1,9 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-python main.py %*
+if /I "%1"=="gui" (
+    python gui.py
+) else (
+    python main.py %*
+)
 endlocal

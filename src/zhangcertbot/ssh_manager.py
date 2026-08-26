@@ -16,7 +16,7 @@ class SSHManager:
     def deploy(self, server: ServerConfig, fullchain: Path, private_key: Path) -> None:
         if paramiko is None:
             raise RuntimeError("未安装 Paramiko，无法执行 SSH 部署")
-        key_path = Path(os.path.expandvars(os.path.expanduser(server.private_key)))
+        key_path = Path(os.path.expandvars(os.path.expanduser(server.private_key.strip().strip('"').strip("'"))))
         if not key_path.exists():
             raise FileNotFoundError(f"SSH 私钥不存在：{key_path}")
         client = paramiko.SSHClient()

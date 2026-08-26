@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from src.zhangcertbot.config_manager import ConfigManager, mask_secret, validate_domains
+from src.zhangcertbot.config_manager import ConfigManager, mask_secret, resolve_path, validate_domains
 
 
 def test_validate_domains_normalizes_wildcard_and_rejects_url():
@@ -11,6 +11,25 @@ def test_validate_domains_normalizes_wildcard_and_rejects_url():
         assert "域名格式错误" in str(exc)
     else:
         raise AssertionError("URL 应被拒绝")
+
+
+def test_quoted_windows_path_is_normalized(tmp_path: Path):
+    assert resolve_path(r'"D:\\Important\\SSH私钥\\襄阳一区"', tmp_path) == Path(r"D:\Important\SSH私钥\襄阳一区")
+
+
+def test_write_server_accepts_nested_server_name(tmp_path: Path):
+    manager = ConfigManager(tmp_path)
+    path = manager.write_server({
+        "server": {"name": "Zhang服务器", "host": "111.170.173.22", "port": "10140", "username": "root"},
+        "ssh": {"enabled": "true", "private_key": r'"D:\Important\SSH私钥\襄阳一区"'},
+        "deploy": {"certificate_path": "/remote/fullchain.pem", "private_key_path": "/remote/privkey.pem", "reload_nginx": "true", "reload_command": "systemctl reload nginx"},
+        "certificates": {"domains": ""},
+    })
+    loaded = manager.load_server(path)
+    assert loaded.name == "Zhang服务器"
+    assert loaded.port == 10140
+    assert loaded.ssh_enabled is True
+    assert "Zhang服务器" in path.read_text(encoding="utf-8")
 
 
 def test_load_multiple_servers_and_domains(tmp_path: Path):

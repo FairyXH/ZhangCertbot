@@ -8,6 +8,7 @@ from pathlib import Path
 
 
 def resolve_path(value: str, root: Path) -> Path:
+    value = value.strip().strip('"').strip("'")
     path = Path(os.path.expandvars(os.path.expanduser(value)))
     return path if path.is_absolute() else root / path
 
@@ -152,9 +153,7 @@ class ConfigManager:
 
     def write_server(self, values: dict) -> Path:
         self.ensure_dirs()
-        path = self.servers_dir / f"{values['name']}-config.ini"
-        parser = configparser.ConfigParser()
-        parser.read_dict({"server": values["server"], "ssh": values["ssh"], "deploy": values["deploy"], "certificates": values.get("certificates", {"domains": ""})})
+        path = self.servers_dir / f"{values['server']['name']}-config.ini"
         with path.open("w", encoding="utf-8") as handle:
             handle.write("# ZhangCertbot 服务器配置；每个字段均可按需修改。\n\n")
             server = values["server"]

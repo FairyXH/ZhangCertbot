@@ -38,7 +38,22 @@ python -m pip install -r requirements.txt
 
 Token 保存于域名配置和 `data/runtime/cloudflare/` credentials 文件中，不会放进 Certbot 命令行参数，也不会打印到控制台。真实配置文件、runtime、日志和密钥文件已加入 `.gitignore`。模板文件以 `.ini.example` 结尾。
 
-## 首次使用
+## GUI 模式
+
+提供独立 Tkinter 图形界面：
+
+```powershell
+python gui.py
+```
+
+或使用启动脚本：
+
+```powershell
+run.bat gui
+```
+
+GUI 提供服务器配置、域名配置、泛域名开关、Production/Staging、Token 隐藏输入，以及申请、检查、续期、刷新等操作。GUI 与 CLI 共用同一套 INI 配置和 Certbot 编排逻辑。首次保存时会自动在 `data/servers/` 或 `data/domains/` 生成配置文件。
+
 
 直接启动中文菜单：
 
