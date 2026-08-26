@@ -6,7 +6,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from .batch_manager import BatchProcessor, BatchSettings
-from .certificate_manager import certificate_files
+from .certificate_manager import CertificateManager, certificate_files
 from .config_manager import ConfigManager, mask_secret, validate_domains
 from .proxy_manager import ProxyConfig, ProxyManager
 
@@ -146,6 +146,8 @@ class ZhangCertbotGUI:
         ttk.Button(self.certificate_panel, text="打开内容", command=self.open_selected_certificate).pack(side="bottom", fill="x", pady=(5, 0))
 
     def refresh_certificate_list(self, domain):
+        if domain:
+            CertificateManager(CertbotRunner(self.root)).restore_from_archive(domain)
         self.certificate_list.delete(0, "end")
         self.certificate_paths = certificate_files(domain.output_dir) if domain else []
         for path in self.certificate_paths:
