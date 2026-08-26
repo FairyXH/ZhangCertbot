@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import configparser
 import os
+import socket
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -16,6 +17,14 @@ class ProxyConfig:
     def url(self) -> str:
         return f"socks5h://{self.host}:{self.port}"
 
+    def check(self, timeout: float = 1.5) -> tuple[bool, str]:
+        if not self.enabled:
+            return True, "代理未启用"
+        try:
+            with socket.create_connection((self.host, self.port), timeout=timeout):
+                return True, f"SOCKS5 代理可连接：{self.host}:{self.port}"
+        except OSError as exc:
+            return False, f"SOCKS5 代理无法连接：{self.host}:{self.port}：{exc}"
     def environment(self, base: dict[str, str] | None = None) -> dict[str, str]:
         environment = dict(base or os.environ)
         keys = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")

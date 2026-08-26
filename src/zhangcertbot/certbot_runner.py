@@ -47,6 +47,16 @@ class CertbotRunner:
     def run(self, arguments: list[str], on_output: Callable[[str], None] | None = None) -> CertbotResult:
         command = self.executable.split() + arguments if self.executable.startswith("python -m certbot") else [self.executable, *arguments]
         try:
+            proxy_ok, proxy_message = self.proxy.check()
+            if not proxy_ok:
+                if on_output:
+                    on_output(proxy_message)
+                return CertbotResult(2, "", proxy_message)
+        except Exception as exc:
+            if on_output:
+                on_output(f"代理检查失败：{exc}")
+            return CertbotResult(2, "", str(exc))
+        try:
             if on_output is None:
                 completed = subprocess.run(command, cwd=self.root, env=self.proxy.environment(), text=True, capture_output=True, check=False)
                 return CertbotResult(completed.returncode, completed.stdout, completed.stderr)
