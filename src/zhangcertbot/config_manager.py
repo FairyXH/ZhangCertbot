@@ -36,7 +36,10 @@ def validate_domains(domains: list[str]) -> list[str]:
         if any(not all(char.isalnum() or char == "-" for char in label) for label in labels):
             raise ValueError(f"域名格式错误：{raw}")
         if domain not in result:
-            result.append(domain)
+            if domain.startswith("*.") and base not in result:
+                result.append(base)
+            if domain not in result:
+                result.append(domain)
     return result
 
 

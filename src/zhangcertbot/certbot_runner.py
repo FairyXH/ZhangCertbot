@@ -55,9 +55,12 @@ class CertbotRunner:
 
     def issue(self, domain: DomainConfig) -> CertbotResult:
         credentials = self.manager.credentials_path(domain)
-        args = ["certonly", *self._common(), "--dns-cloudflare", "--dns-cloudflare-credentials", str(credentials),
-                "--email", domain.email, "--agree-tos", "--server", DIRECTORIES[domain.environment],
-                "--cert-name", domain.cert_name]
+        args = ["certonly", *self._common(), "--dns-cloudflare", "--dns-cloudflare-credentials", str(credentials)]
+        if domain.email:
+            args.extend(["--email", domain.email, "--agree-tos"])
+        else:
+            args.append("--register-unsafely-without-email")
+        args.extend(["--server", DIRECTORIES[domain.environment], "--cert-name", domain.cert_name])
         for name in domain.domains:
             args.extend(["-d", name])
         args.extend(domain.certbot_extra)

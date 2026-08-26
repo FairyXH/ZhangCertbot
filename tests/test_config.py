@@ -13,6 +13,10 @@ def test_validate_domains_normalizes_wildcard_and_rejects_url():
         raise AssertionError("URL 应被拒绝")
 
 
+def test_leading_star_input_expands_to_base_and_wildcard():
+    assert validate_domains(["*.example.com"]) == ["example.com", "*.example.com"]
+
+
 def test_quoted_windows_path_is_normalized(tmp_path: Path):
     assert resolve_path(r'"D:\\Important\\SSH私钥\\襄阳一区"', tmp_path) == Path(r"D:\Important\SSH私钥\襄阳一区")
 

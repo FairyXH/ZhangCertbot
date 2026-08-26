@@ -82,7 +82,53 @@ data/
 └── runtime/cloudflare/      # Certbot credentials，不提交 Git
 ```
 
-## 服务器二级域名列表
+## 域名创建模式
+
+GUI 提供两种明确的创建模式。
+
+### 创建孤立域名
+
+点击“新建孤立域名”时只显示两个输入框：
+
+- Cloudflare Token
+- 域名
+
+域名如果输入：
+
+```text
+*.example.com
+```
+
+程序会自动申请：
+
+```text
+example.com
+*.example.com
+```
+
+孤立域名不绑定服务器，不保存 SSH 信息，也不会执行上传或 Nginx reload。
+
+### 创建服务器部署域名
+
+点击“新建服务器部署域名”时显示：
+
+- Cloudflare Token
+- 域名
+- 服务器名称
+- 服务器 IP
+- SSH 端口
+- SSH 私钥
+- SSH 私钥文件选择器
+- 远程 fullchain.pem 路径
+- 远程 privkey.pem 路径
+- 重载命令（可选）
+- 自动重载
+- 自动上传
+
+域名前缀为 `*.` 时自动生成基础域名和泛域名两个 Certbot SAN。
+
+保存服务器部署域名时，程序会写入服务器配置和域名配置；远程证书路径保存在该域名自己的 `[deploy:<server-config>]` 段中，不会与同服务器的其他域名混用。
+
 
 GUI 左侧树状列表按以下层级展示：
 
