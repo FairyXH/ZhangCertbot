@@ -86,6 +86,8 @@ class BatchProcessor:
     def renew(self, domains: Iterable[DomainConfig], settings: BatchSettings,
               force: bool = False, callback: Callable[[BatchItemResult], None] | None = None) -> list[BatchItemResult]:
         domain_list = list(domains)
+        for domain in domain_list:
+            self.deployer.certificates.adopt_existing(domain)
         def stream(line: str):
             if callback:
                 callback(BatchItemResult(domain_list[0].name if len(domain_list) == 1 else "批量续期", False, line))

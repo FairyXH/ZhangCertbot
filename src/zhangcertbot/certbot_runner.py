@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import configparser
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -41,6 +43,16 @@ class CertbotRunner:
             return found
         return "python -m certbot"
 
+    def account_for(self, domain: DomainConfig) -> str:
+        renewal = self.certbot_dir / "renewal" / f"{domain.cert_name}.conf"
+        if renewal.exists():
+            parser = configparser.ConfigParser(interpolation=None)
+            parser.read(renewal, encoding="utf-8")
+            return parser.get("renewalparams", "account", fallback="")
+        return ""
+
+    def server_url(self, domain: DomainConfig) -> str:
+        return DIRECTORIES[domain.environment]
     def version(self) -> CertbotResult:
         return self.run(["--version"])
 
@@ -87,6 +99,9 @@ class CertbotRunner:
         else:
             args.append("--register-unsafely-without-email")
         args.extend(["--agree-tos", "--server", DIRECTORIES[domain.environment], "--cert-name", domain.cert_name])
+        account = self.account_for(domain)
+        if account:
+            args.extend(["--account", account])
         for name in domain.domains:
             args.extend(["-d", name])
         args.extend(domain.certbot_extra)
