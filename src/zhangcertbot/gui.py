@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import socket
+import sys
 import threading
 import tkinter as tk
 from pathlib import Path
@@ -568,7 +569,9 @@ class ZhangCertbotGUI:
 
 
 def main():
-    ZhangCertbotGUI(Path(__file__).resolve().parents[2]).run()
+    # Frozen builds keep runtime data beside the executable; source runs use the repository root.
+    root = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parents[2]
+    ZhangCertbotGUI(root).run()
 
 
 if __name__ == "__main__": main()
