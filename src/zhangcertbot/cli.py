@@ -88,12 +88,13 @@ def renew(manager: ConfigManager, force: bool = False) -> int:
     failures = 0
     for domain in manager.list_domains():
         try:
-            if certificates.export(domain):
+            changed = certificates.export(domain)
+            if changed:
                 print(f"已导出更新证书：{domain.name}")
+                if domain.deploy:
+                    print(f"部署结果：{domain.name} → {deployer.deploy(domain)}")
             else:
-                print(f"未更新：{domain.name}")
-            if domain.deploy:
-                print(f"部署结果：{domain.name} → {deployer.deploy(domain)}")
+                print(f"未更新：{domain.name}，不执行部署")
         except Exception as exc:
             failures += 1
             print(f"处理失败：{domain.name}：{exc}")
@@ -153,6 +154,12 @@ def main(argv: list[str] | None = None) -> int:
                 if not result.ok:
                     failures += 1
                     print(result.stderr.strip())
+                else:
+                    certificates = CertificateManager(runner)
+                    deployer = DeployManager(manager, certificates)
+                    changed = certificates.export(domain)
+                    if changed and domain.deploy:
+                        print(f"部署结果：{domain.name} → {deployer.deploy(domain)}")
             return 1 if failures else 0
         if args.command == "check":
             result = runner.certificates()
