@@ -4,6 +4,15 @@ import os
 import shutil
 from pathlib import Path
 
+
+CERTIFICATE_FILE_NAMES = {"cert.pem", "chain.pem", "fullchain.pem", "privkey.pem", "metadata.json"}
+
+
+def certificate_files(directory: Path) -> list[Path]:
+    if not directory.is_dir():
+        return []
+    return sorted((path for path in directory.iterdir() if path.is_file() and path.name in CERTIFICATE_FILE_NAMES), key=lambda path: path.name)
+
 from .certbot_runner import CertbotRunner
 from .config_manager import DomainConfig
 

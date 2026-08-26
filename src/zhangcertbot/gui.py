@@ -6,6 +6,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from .batch_manager import BatchProcessor, BatchSettings
+from .certificate_manager import certificate_files
 from .config_manager import ConfigManager, mask_secret, validate_domains
 
 
@@ -87,6 +88,8 @@ class ZhangCertbotGUI:
         lower.add(log_host, weight=2)
         self._build_form(form_host)
         self._build_log_panel(log_host)
+        self._build_certificate_panel(log_host)
+
 
     def _build_form(self, parent):
         self.form = ttk.LabelFrame(parent, text="域名配置", padding=10)
@@ -112,8 +115,11 @@ class ZhangCertbotGUI:
         self.form_mode_label.grid(row=len(fields) + 2, column=1, sticky="w", pady=3)
 
     def _build_log_panel(self, parent):
+        parent.rowconfigure(0, weight=2)
+        parent.rowconfigure(2, weight=1)
+        parent.columnconfigure(0, weight=1)
         self.log_panel = ttk.LabelFrame(parent, text="实时日志", padding=6)
-        self.log_panel.grid(row=3, column=0, sticky="nsew", pady=(10, 0))
+        self.log_panel.grid(row=0, column=0, sticky="nsew")
         self.log_panel.rowconfigure(0, weight=1)
         self.log_panel.columnconfigure(0, weight=1)
         self.output = tk.Text(self.log_panel, height=8, state="disabled", wrap="word")
@@ -123,10 +129,60 @@ class ZhangCertbotGUI:
         self.output.configure(yscrollcommand=scroll.set)
         ttk.Button(self.log_panel, text="清空日志", command=self.clear_log).grid(row=1, column=0, sticky="e", pady=(5, 0))
 
+    def _build_certificate_panel(self, parent):
+        self.certificate_panel = ttk.LabelFrame(parent, text="当前域名证书", padding=6)
+        self.certificate_panel.grid(row=2, column=0, sticky="nsew", pady=(10, 0))
+        self.certificate_list = tk.Listbox(self.certificate_panel, exportselection=False, height=6)
+        self.certificate_list.pack(side="left", fill="both", expand=True)
+        self.certificate_list.bind("<ButtonRelease-1>", self.open_selected_certificate)
+        scrollbar = ttk.Scrollbar(self.certificate_panel, orient="vertical", command=self.certificate_list.yview)
+        scrollbar.pack(side="right", fill="y")
+        self.certificate_list.configure(yscrollcommand=scrollbar.set)
+        self.certificate_paths: list[Path] = []
+        self.certificate_list.bind("<Return>", self.open_selected_certificate)
+        ttk.Button(self.certificate_panel, text="打开内容", command=self.open_selected_certificate).pack(side="bottom", fill="x", pady=(5, 0))
+
+    def refresh_certificate_list(self, domain):
+        self.certificate_list.delete(0, "end")
+        self.certificate_paths = certificate_files(domain.output_dir) if domain else []
+        for path in self.certificate_paths:
+            self.certificate_list.insert("end", path.name)
+        if not self.certificate_paths:
+            self.certificate_list.insert("end", "暂无已导出证书")
+
+    def open_selected_certificate(self, _event=None):
+        selection = self.certificate_list.curselection()
+        if not selection or selection[0] >= len(self.certificate_paths):
+            return
+        path = self.certificate_paths[selection[0]]
+        try:
+            content = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            content = path.read_text(encoding="utf-8", errors="replace")
+        dialog = tk.Toplevel(self.window)
+        dialog.title(f"证书内容 - {path.name}")
+        dialog.geometry("900x650")
+        dialog.rowconfigure(0, weight=1)
+        dialog.columnconfigure(0, weight=1)
+        text = tk.Text(dialog, wrap="none")
+        text.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
+        text.insert("1.0", content)
+        text.configure(state="disabled")
+        yscroll = ttk.Scrollbar(dialog, orient="vertical", command=text.yview)
+        yscroll.grid(row=0, column=1, sticky="ns", pady=8)
+        text.configure(yscrollcommand=yscroll.set)
+        ttk.Button(dialog, text="复制内容", command=lambda: self.copy_certificate_content(content)).grid(row=1, column=0, sticky="e", padx=8, pady=(0, 8))
+
+    def copy_certificate_content(self, content):
+        self.window.clipboard_clear()
+        self.window.clipboard_append(content)
+        self.window.update()
+        self.log("证书内容已复制到剪贴板")
     def clear_log(self):
         self.output.configure(state="normal")
         self.output.delete("1.0", "end")
         self.output.configure(state="disabled")
+
     def choose_key(self):
         path = filedialog.askopenfilename(title="选择 SSH 私钥文件")
         if path:
@@ -182,6 +238,7 @@ class ZhangCertbotGUI:
         self.domain_title.configure(text="请选择服务器")
         self.domain_list.delete(0, "end")
         self._clear_form()
+        self.refresh_certificate_list(None)
 
     def on_server_select(self, _event=None):
         selection = self.server_list.curselection()
@@ -207,6 +264,7 @@ class ZhangCertbotGUI:
             if not domain.deploy:
                 self.domain_list.insert("end", domain.name)
         self.new_orphan()
+        self.refresh_certificate_list(None)
 
     def on_domain_select(self, _event=None):
         selection = self.domain_list.curselection()
@@ -216,6 +274,7 @@ class ZhangCertbotGUI:
         if domain:
             self.selected_domain_file = domain.file.name
             self.load_domain(domain)
+            self.refresh_certificate_list(domain)
 
     def _set_deploy_fields_visible(self, visible: bool):
         state = "normal" if visible else "disabled"
@@ -289,6 +348,7 @@ class ZhangCertbotGUI:
             path = self.manager.write_domain(values)
             self.log(f"已保存：{path.name}，Token：{mask_secret(token)}")
             self.show_servers() if self.mode.get() == "deploy" else self.show_orphans()
+            self.refresh_certificate_list(None)
         except Exception as exc: messagebox.showerror("保存失败", str(exc))
 
     def _settings(self): return BatchSettings(self.parallel.get(), max(1, int(self.workers.get())), max(0, int(self.retries.get())))
@@ -302,10 +362,18 @@ class ZhangCertbotGUI:
                 results = function(progress)
                 ok_count = sum(1 for item in results if item.ok)
                 fail_count = len(results) - ok_count
-                self.window.after(0, lambda: self.log(f"[{label}] 处理结束：成功 {ok_count}，失败 {fail_count}，共 {len(results)} 个域名"))
+                self.window.after(0, lambda: self._finish_async(label, results))
             except Exception as exc:
                 self.window.after(0, lambda: self.log(f"[{label}] 失败：{exc}"))
         threading.Thread(target=work, daemon=True).start()
+
+    def _finish_async(self, label, results):
+        ok_count = sum(1 for item in results if item.ok)
+        fail_count = len(results) - ok_count
+        self.log(f"[{label}] 处理结束：成功 {ok_count}，失败 {fail_count}，共 {len(results)} 个域名")
+        domain = self.current_domain()
+        if domain:
+            self.refresh_certificate_list(domain)
 
     def current_domain(self):
         if not self.selected_domain_file: return None
