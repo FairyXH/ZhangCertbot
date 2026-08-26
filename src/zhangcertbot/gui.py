@@ -13,6 +13,7 @@ except ImportError:
     paramiko = None
 
 from .batch_manager import BatchProcessor, BatchSettings
+from .certbot_import_manager import CertbotImportManager
 from .certbot_runner import CertbotRunner
 from .certificate_manager import CertificateManager, certificate_files
 from .config_manager import ConfigManager, mask_secret, validate_domains
@@ -26,6 +27,7 @@ class ZhangCertbotGUI:
         self.manager = ConfigManager(self.root)
         self.manager.ensure_dirs()
         self.proxy_manager = ProxyManager(self.root)
+        self.import_manager = CertbotImportManager(self.root)
         self.window = tk.Tk()
         self.window.title("ZhangCertbot - 证书管理")
         self.window.geometry("1250x780")
@@ -36,7 +38,7 @@ class ZhangCertbotGUI:
         self.parallel = tk.BooleanVar(value=False)
         self.workers = tk.IntVar(value=4)
         self._build()
-        self.show_servers()
+        self.refresh_all()
 
     def _build(self):
         self.window.columnconfigure(0, weight=1)
@@ -46,7 +48,8 @@ class ZhangCertbotGUI:
         ttk.Button(toolbar, text="孤立域名", command=self.show_orphans).pack(side="left", padx=3)
         ttk.Button(toolbar, text="新建孤立域名", command=self.new_orphan).pack(side="left", padx=3)
         ttk.Button(toolbar, text="新建服务器部署域名", command=self.new_deploy_domain).pack(side="left", padx=3)
-        ttk.Button(toolbar, text="刷新", command=self.show_servers).pack(side="left", padx=3)
+        ttk.Button(toolbar, text="刷新", command=self.refresh_all).pack(side="left", padx=3)
+        ttk.Button(toolbar, text="导入证书", command=self.open_import_dialog).pack(side="left", padx=3)
         ttk.Button(toolbar, text="代理", command=self.open_proxy_dialog).pack(side="left", padx=3)
         ttk.Label(toolbar, text="批量并发").pack(side="left", padx=(24, 3))
         ttk.Checkbutton(toolbar, text="启用", variable=self.parallel).pack(side="left")
@@ -279,6 +282,45 @@ class ZhangCertbotGUI:
             self.on_server_select()
         else:
             self.show_orphans()
+    def refresh_all(self):
+        try:
+            imported = self.import_manager.sync()
+            if imported:
+                self.log(f"已导入旧 Certbot 证书：{', '.join(imported)}")
+        except Exception as exc:
+            self.log(f"旧 Certbot 目录同步失败：{type(exc).__name__}: {exc}")
+        self.show_servers()
+
+    def open_import_dialog(self):
+        dialog = tk.Toplevel(self.window)
+        dialog.title("导入旧 Certbot 目录")
+        dialog.geometry("760x430")
+        dialog.transient(self.window)
+        dialog.grab_set()
+        ttk.Label(dialog, text="旧 Certbot 根目录列表").pack(anchor="w", padx=12, pady=(12, 4))
+        listbox = tk.Listbox(dialog, height=12, exportselection=False)
+        listbox.pack(fill="both", expand=True, padx=12, pady=4)
+        def reload_list():
+            listbox.delete(0, "end")
+            for path in self.import_manager.paths():
+                listbox.insert("end", str(path))
+        def add():
+            selected = filedialog.askdirectory(title="选择旧 Certbot 根目录", parent=dialog)
+            if selected and self.import_manager.add_path(Path(selected)):
+                reload_list()
+        def remove():
+            selection = listbox.curselection()
+            if selection:
+                self.import_manager.remove_path(selection[0])
+                reload_list()
+        buttons = ttk.Frame(dialog)
+        buttons.pack(fill="x", padx=12, pady=8)
+        ttk.Button(buttons, text="添加目录", command=add).pack(side="left", padx=3)
+        ttk.Button(buttons, text="删除目录", command=remove).pack(side="left", padx=3)
+        ttk.Button(buttons, text="立即同步", command=lambda: (self.refresh_all(), reload_list())).pack(side="left", padx=3)
+        ttk.Button(buttons, text="关闭", command=dialog.destroy).pack(side="right", padx=3)
+        reload_list()
+
     def show_servers(self):
         servers = self.manager.list_servers()
         self.server_list.delete(0, "end")

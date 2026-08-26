@@ -38,7 +38,22 @@ python -m pip install -r requirements.txt
 
 Token 保存于域名配置和 `data/runtime/cloudflare/` credentials 文件中，不会放进 Certbot 命令行参数，也不会打印到控制台。真实配置文件、runtime、日志和密钥文件已加入 `.gitignore`。模板文件以 `.ini.example` 结尾。
 
-## GUI 模式
+旧 Certbot 目录导入
+
+GUI 顶部的“导入证书”按钮会打开旧 Certbot 目录管理窗口。可以添加多个 Certbot 根目录；程序会保存这些目录，并在每次启动或点击“刷新”时扫描其 `renewal/` 和 `archive/`。
+
+检测到尚未接管的证书后，程序会：
+
+1. 识别 renewal 配置和证书名称；
+2. 复制 archive 证书到当前项目的 `data/certbot/archive/`；
+3. 复制账户目录；
+4. 导出 `fullchain.pem` 和 `privkey.pem` 到 `data/certificates/`；
+5. 创建新的域名 INI 配置；
+6. 重写当前项目的 renewal 路径，使后续由 ZhangCertbot 接管；
+7. 已存在的域名不会被覆盖。
+
+导入的域名默认作为孤立域名处理，不会自动部署到服务器。导入后可以在 GUI 中补充 Cloudflare Token、服务器和部署配置。
+
 
 提供独立 Tkinter 图形界面：
 
