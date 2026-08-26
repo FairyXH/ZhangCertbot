@@ -45,10 +45,14 @@ class CertbotRunner:
 
     def account_for(self, domain: DomainConfig) -> str:
         renewal = self.certbot_dir / "renewal" / f"{domain.cert_name}.conf"
-        if renewal.exists():
-            parser = configparser.ConfigParser(interpolation=None)
-            parser.read(renewal, encoding="utf-8")
-            return parser.get("renewalparams", "account", fallback="")
+        if not renewal.exists():
+            return ""
+        try:
+            for line in renewal.read_text(encoding="utf-8").splitlines():
+                if line.strip().startswith("account") and "=" in line:
+                    return line.split("=", 1)[1].strip()
+        except OSError:
+            return ""
         return ""
 
     def server_url(self, domain: DomainConfig) -> str:

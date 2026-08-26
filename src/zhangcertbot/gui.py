@@ -156,7 +156,9 @@ class ZhangCertbotGUI:
 
     def refresh_certificate_list(self, domain):
         if domain:
-            CertificateManager(CertbotRunner(self.root)).restore_from_archive(domain)
+            manager = CertificateManager(CertbotRunner(self.root))
+            if manager.restore_from_archive(domain):
+                self.log(f"已从 Certbot archive 恢复证书：{domain.cert_name}")
         self.certificate_list.delete(0, "end")
         self.certificate_paths = certificate_files(domain.output_dir) if domain else []
         for path in self.certificate_paths:
@@ -500,7 +502,8 @@ class ZhangCertbotGUI:
 
     def renew_current(self):
         domain = self.current_domain()
-        if domain: self._async(lambda callback: self._processor().renew([domain], self._settings(), callback=callback), "续期")
+        if domain:
+            self._async(lambda callback: self._processor().renew([domain], self._settings(), callback=callback), "续期")
 
     def deploy_current(self):
         domain = self.current_domain()

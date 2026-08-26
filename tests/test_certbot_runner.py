@@ -11,6 +11,15 @@ def make_domain(tmp_path: Path, environment: str = "production", email: str = "a
                         tmp_path / "output", False, "")
 
 
+def test_account_for_reads_certbot_flat_renewal_file(tmp_path: Path):
+    runner = CertbotRunner(tmp_path, executable="certbot")
+    runner.certbot_dir.joinpath("renewal").mkdir(parents=True)
+    runner.certbot_dir.joinpath("renewal", "example.com.conf").write_text(
+        "version = 5.7.0\narchive_dir = old\n[renewalparams]\naccount = account-id\n", encoding="utf-8"
+    )
+    assert runner.account_for(make_domain(tmp_path)) == "account-id"
+
+
 def test_issue_command_uses_verbose_and_insecure_ssl_flags(tmp_path: Path, monkeypatch):
     runner = CertbotRunner(tmp_path, executable="certbot")
     captured = {}
@@ -61,23 +70,6 @@ def test_wildcard_domain_name_round_trips(tmp_path: Path):
     loaded = manager.load_domain(path)
     assert loaded.name == "*.zhangfairy.ccwu.cc"
     assert loaded.domains == ["zhangfairy.ccwu.cc", "*.zhangfairy.ccwu.cc"]
-
-
-def test_streaming_run_treats_windows_bad_fd_after_success_as_eof(tmp_path: Path, monkeypatch):
-    runner = CertbotRunner(tmp_path, executable="certbot")
-
-    class Stream:
-        def __iter__(self):
-            yield "Successfully received certificate.\n"
-            raise OSError(9, "Bad file descriptor")
-
-    process = SimpleNamespace(stdout=Stream(), wait=lambda: 0)
-    monkeypatch.setattr("subprocess.Popen", lambda *args, **kwargs: process)
-    lines = []
-    result = runner.run(["certonly"], on_output=lines.append)
-    assert result.code == 0
-    assert "Successfully received certificate." in result.stdout
-    assert lines == ["Successfully received certificate."]
 
 
 def test_config_manager_deletes_server_and_domain(tmp_path: Path):

@@ -128,7 +128,13 @@ class CertificateManager:
         return changed
 
     def restore_from_archive(self, domain: DomainConfig) -> bool:
-        return self.adopt_existing(domain) and self.export(domain)
+        try:
+            adopted = self.adopt_existing(domain)
+            if adopted:
+                self.export(domain)
+            return adopted
+        except (OSError, ValueError, TypeError):
+            return False
 
     def status(self, domain: DomainConfig) -> str:
         fullchain, _ = self.runner.live_paths(domain)
