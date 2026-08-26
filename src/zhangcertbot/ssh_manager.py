@@ -37,6 +37,15 @@ class SSHManager:
         value = server.private_key.strip().strip('"').strip("'")
         return Path(os.path.expandvars(os.path.expanduser(value)))
 
+    @staticmethod
+    def remote_directory(remote: str) -> str:
+        directory = posixpath.dirname(remote)
+        return directory or "."
+
+    @staticmethod
+    def shell_quote(value: str) -> str:
+        return "'" + value.replace("'", "'" + chr(34) + "'" + chr(34) + "'") + "'"
+
     def connect(self, server: ServerConfig):
         if paramiko is None:
             raise RuntimeError("未安装 Paramiko，无法执行 SSH 操作")
@@ -96,8 +105,18 @@ class SSHManager:
         try:
             sftp = client.open_sftp()
             try:
-                self._upload_atomic(sftp, fullchain, binding.certificate_path)
-                self._upload_atomic(sftp, private_key, binding.private_key_path)
+                directory = self.remote_directory(binding.certificate_path)
+                if directory != ".":
+                    try:
+                        sftp.stat(directory)
+                    except Exception:
+                        channel = client.get_transport().open_session()
+                        channel.exec_command(f"mkdir -p -- {self.shell_quote(directory)}")
+                        if channel.recv_exit_status() != 0:
+                            raise RuntimeError(f"无法创建远程目录：{directory}")
+                        channel.close()
+                self._upload_atomic(sftp, fullchain, binding.certificate_path, client)
+                self._upload_atomic(sftp, private_key, binding.private_key_path, client)
             finally:
                 sftp.close()
             if binding.reload_nginx:
@@ -111,7 +130,7 @@ class SSHManager:
             client.close()
 
     @staticmethod
-    def _upload_atomic(sftp, local: Path, remote: str) -> None:
+    def _upload_atomic(sftp, local: Path, remote: str, client=None) -> None:
         if not local.is_file():
             raise FileNotFoundError(f"本地证书文件不存在：{local}")
         temporary = f"{remote}.zhangcertbot-{os.getpid()}.tmp"
@@ -126,6 +145,17 @@ class SSHManager:
         if remote_size != local.stat().st_size:
             raise RuntimeError(f"SFTP 上传校验失败：{remote}（本地 {local.stat().st_size} 字节，远程 {remote_size} 字节）")
         try:
-            sftp.rename(temporary, remote)
+            if hasattr(sftp, "posix_rename"):
+                sftp.posix_rename(temporary, remote)
+            else:
+                channel = client.get_transport().open_session() if client is not None else None
+                if channel is None:
+                    raise RuntimeError("当前 SFTP 服务不支持覆盖式重命名")
+                channel.exec_command(f"mv -f -- {SSHManager.shell_quote(temporary)} {SSHManager.shell_quote(remote)}")
+                code = channel.recv_exit_status()
+                error = channel.makefile_stderr().read().decode(errors="replace").strip()
+                channel.close()
+                if code != 0:
+                    raise RuntimeError(error or "远程 mv 命令失败")
         except Exception as exc:
             raise RuntimeError(f"替换远程证书文件失败：{remote}。请确认目标目录存在且用户有写权限：{type(exc).__name__}: {exc}") from exc
