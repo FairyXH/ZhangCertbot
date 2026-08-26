@@ -1,0 +1,36 @@
+# ZhangCertbot 域名配置模板
+# 复制为 data/domains/example.ini 后填写真实 Token。
+
+[domain]
+# 域名显示名称
+name = example.com
+# 是否申请泛域名
+wildcard = true
+# 申请的域名列表，泛域名时包含基础域名和 *.基础域名
+domains = example.com, *.example.com
+
+[letsencrypt]
+# Let's Encrypt 环境：production 或 staging
+environment = staging
+# 注册邮箱
+email = admin@example.com
+# Certbot 证书名称
+cert_name = example.com
+
+[cloudflare]
+# Cloudflare API Token，仅需 Zone:Read 和 DNS:Edit
+api_token = CHANGE_ME
+# Cloudflare Zone
+zone = example.com
+
+[certificate]
+# 本地最终证书导出目录
+output_dir = data/certificates/example.com
+# 额外 Certbot 参数，逗号分隔
+certbot_extra =
+
+[server]
+# 是否部署到服务器；false 表示仅本地保存
+deploy = false
+# 服务器配置文件名，例如 server1-config.ini
+server =

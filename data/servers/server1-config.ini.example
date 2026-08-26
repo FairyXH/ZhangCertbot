@@ -1,0 +1,32 @@
+# ZhangCertbot 服务器配置模板
+# 复制为 data/servers/server1-config.ini 后填写真实值。
+
+[server]
+# 服务器显示名称
+name = server1
+# SSH 地址，可以填写 IP 或域名
+host = example.com
+# SSH 端口，默认 22
+port = 22
+# SSH 用户名
+username = root
+
+[ssh]
+# 是否启用自动 SSH 上传
+ enabled = false
+# SSH 私钥路径，不保存私钥内容
+private_key = ~/.ssh/id_ed25519
+
+[deploy]
+# 上传后的 fullchain.pem 目标路径
+certificate_path = /etc/nginx/ssl/example/fullchain.pem
+# 上传后的 privkey.pem 目标路径
+private_key_path = /etc/nginx/ssl/example/privkey.pem
+# 是否在 nginx -t 成功后 reload
+reload_nginx = true
+# reload 命令
+reload_command = systemctl reload nginx
+
+[certificates]
+# 关联的域名配置文件，逗号分隔
+ domains = example.ini

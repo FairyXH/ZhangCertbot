@@ -1,0 +1,16 @@
+config.toml
+data/runtime/
+logs/
+*.token
+*.secret
+*.key
+*.pem
+cloudflare.ini
+data/domains/*.ini
+data/servers/*.ini
+!data/domains/*.ini.example
+!data/servers/*.ini.example
+*.key
+__pycache__/
+.venv/
+.pytest_cache/
