@@ -3,3 +3,5 @@ certbot-dns-cloudflare
 paramiko
 httpx[socks]
 cryptography
+# cryptography>=50 移除了 GEN_EMAIL 等 OpenSSL 绑定常量，pyOpenSSL<26 会在导入期崩溃
+pyOpenSSL>=26.4.0
